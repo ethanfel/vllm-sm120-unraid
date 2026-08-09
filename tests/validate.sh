@@ -55,7 +55,8 @@ import xml.etree.ElementTree as ET
 path = sys.argv[1]
 root = ET.parse(path).getroot()
 assert root.tag == "Container"
-assert root.findtext("Repository") == "ghcr.io/ethanfel/vllm-sm120-unraid:0.1.0"
+assert root.findtext("Repository") == "ghcr.io/ethanfel/vllm-sm120-unraid:0.1.1"
+assert root.findtext("WebUI") == "http://[IP]:[PORT:8000]/"
 targets = {node.attrib.get("Target") for node in root.findall("Config")}
 required = {
     "/models", "8000", "MODEL_ID", "SERVED_MODEL_NAME", "MAX_MODEL_LEN",
@@ -71,7 +72,8 @@ PY
 else
   template="${repo_dir}/unraid/my-vLLM-SM120.xml"
   grep -Fq '<Container version="2">' "${template}"
-  grep -Fq '<Repository>ghcr.io/ethanfel/vllm-sm120-unraid:0.1.0</Repository>' "${template}"
+  grep -Fq '<Repository>ghcr.io/ethanfel/vllm-sm120-unraid:0.1.1</Repository>' "${template}"
+  grep -Fq '<WebUI>http://[IP]:[PORT:8000]/</WebUI>' "${template}"
   grep -Fq 'Target="MODEL_ID"' "${template}"
   grep -Fq 'Target="SERVED_MODEL_NAME"' "${template}"
   echo "Shell syntax and required Unraid XML fields are valid (python3 unavailable; basic XML check used)"

@@ -17,6 +17,9 @@ class Handler(BaseHTTPRequestHandler):
                 {"object": "list", "data": [{"id": "fake-model"}]}
             ).encode()
             content_type = "application/json"
+        elif self.path == "/docs":
+            payload = b"<!doctype html><title>Fake vLLM Swagger</title>"
+            content_type = "text/html"
         else:
             payload = b'{"detail":"not found"}'
             content_type = "application/json"

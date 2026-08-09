@@ -101,10 +101,25 @@ class OnDemandServerTests(unittest.IsolatedAsyncioTestCase):
             async with httpx.AsyncClient(
                 transport=transport, base_url="http://controller"
             ) as client:
+                dashboard = await client.get("/")
+                self.assertEqual(dashboard.status_code, 200)
+                self.assertIn("vLLM On-Demand", dashboard.text)
+                self.assertNotIn("__DEFAULT_MODEL_JSON__", dashboard.text)
+
+                docs_alias = await client.get("/docs")
+                self.assertEqual(docs_alias.status_code, 200)
+                self.assertIn("Connection and models", docs_alias.text)
+                self.assertEqual((await controller.snapshot())["state"], "unloaded")
+                self.assertIsNone(controller.process)
+
                 response = await client.get("/v1/models")
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.json()["data"][0]["id"], "fake-model")
                 self.assertEqual((await controller.snapshot())["state"], "ready")
+
+                upstream_docs = await client.get("/vllm/docs")
+                self.assertEqual(upstream_docs.status_code, 200)
+                self.assertIn("Fake vLLM Swagger", upstream_docs.text)
 
                 for _ in range(30):
                     if (await controller.snapshot())["state"] == "unloaded":

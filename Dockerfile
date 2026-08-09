@@ -18,6 +18,7 @@ ENV TORCH_CUDA_ARCH_LIST=12.0 \
 
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/vllm-unraid-entrypoint
 COPY --chmod=0755 docker/on_demand_server.py /usr/local/bin/vllm-on-demand-server
+COPY docker/dashboard.html /usr/local/share/vllm-on-demand/dashboard.html
 
 EXPOSE 8000
 

@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>vLLM On-Demand</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080b12;
+      --panel: #111722;
+      --panel-2: #161e2c;
+      --border: #263247;
+      --text: #eef3fb;
+      --muted: #94a3b8;
+      --accent: #6ee7b7;
+      --accent-2: #60a5fa;
+      --warn: #fbbf24;
+      --error: #fb7185;
+      --shadow: 0 18px 45px rgb(0 0 0 / 28%);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font: 15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 12% -10%, rgb(37 99 235 / 18%), transparent 32rem),
+        radial-gradient(circle at 90% 0%, rgb(16 185 129 / 14%), transparent 28rem),
+        var(--bg);
+    }
+
+    button, input, textarea { font: inherit; }
+    a { color: #93c5fd; }
+    code { color: #a7f3d0; }
+    .shell { width: min(1440px, calc(100% - 32px)); margin: 0 auto; padding: 30px 0 52px; }
+    .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
+    h1 { margin: 0; font-size: clamp(28px, 4vw, 44px); letter-spacing: -0.04em; }
+    h2 { margin: 0 0 7px; font-size: 18px; }
+    p { margin: 0; }
+    .subtitle { color: var(--muted); margin-top: 7px; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px;
+      border: 1px solid var(--border); border-radius: 999px; background: rgb(17 23 34 / 80%);
+      color: var(--muted); white-space: nowrap;
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 4px rgb(148 163 184 / 10%); }
+    .state-ready .dot { background: var(--accent); box-shadow: 0 0 0 4px rgb(110 231 183 / 12%); }
+    .state-loading .dot, .state-stopping .dot { background: var(--warn); animation: pulse 1.2s infinite; }
+    .state-error .dot { background: var(--error); }
+    @keyframes pulse { 50% { opacity: .35; } }
+
+    .panel {
+      background: linear-gradient(145deg, rgb(22 30 44 / 94%), rgb(13 18 28 / 96%));
+      border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow);
+    }
+    .status-panel { padding: 20px; margin-bottom: 18px; }
+    .status-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+    .metric { padding: 13px 14px; background: rgb(8 11 18 / 45%); border: 1px solid rgb(38 50 71 / 75%); border-radius: 12px; }
+    .metric span { display: block; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .metric strong { display: block; margin-top: 4px; font-size: 18px; overflow-wrap: anywhere; }
+    .status-error { display: none; margin-top: 12px; padding: 10px 12px; border-radius: 10px; color: #fecdd3; background: rgb(159 18 57 / 18%); border: 1px solid rgb(251 113 133 / 30%); }
+
+    .config { display: grid; grid-template-columns: 1.5fr 1fr auto; gap: 12px; padding: 18px; margin-bottom: 18px; align-items: end; }
+    label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
+    input, textarea {
+      width: 100%; color: var(--text); background: #090d15; border: 1px solid #344159;
+      border-radius: 10px; padding: 10px 12px; outline: none;
+    }
+    input:focus, textarea:focus { border-color: var(--accent-2); box-shadow: 0 0 0 3px rgb(96 165 250 / 12%); }
+    textarea { resize: vertical; min-height: 98px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    button, .button-link {
+      display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 9px 14px;
+      color: #f8fafc; background: #243147; border: 1px solid #3a4a65; border-radius: 10px;
+      cursor: pointer; text-decoration: none; transition: transform .12s ease, border-color .12s ease, background .12s ease;
+    }
+    button:hover, .button-link:hover { transform: translateY(-1px); border-color: #64748b; background: #2c3b55; }
+    button:disabled { opacity: .5; cursor: wait; transform: none; }
+    button.primary { background: #0f766e; border-color: #14b8a6; }
+    button.primary:hover { background: #0d9488; }
+    button.danger { background: #881337; border-color: #be123c; }
+
+    .test-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    .test-card { padding: 18px; }
+    .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+    .card-head p, .hint { color: var(--muted); font-size: 13px; }
+    .fields { display: grid; gap: 10px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .toggle { display: flex; align-items: center; gap: 8px; }
+    .toggle input { width: auto; }
+    .file { padding: 8px; }
+
+    .output-panel { margin-top: 18px; overflow: hidden; }
+    .output-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+    .output-meta { color: var(--muted); font-size: 13px; }
+    pre {
+      margin: 0; min-height: 180px; max-height: 520px; overflow: auto; padding: 18px;
+      color: #dbeafe; background: #05070c; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap; overflow-wrap: anywhere;
+    }
+    .footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 18px; color: var(--muted); font-size: 13px; }
+
+    @media (max-width: 1050px) {
+      .status-grid { grid-template-columns: repeat(3, 1fr); }
+      .config { grid-template-columns: 1fr 1fr; }
+      .config .actions { grid-column: 1 / -1; }
+    }
+    @media (max-width: 760px) {
+      .shell { width: min(100% - 20px, 1440px); padding-top: 20px; }
+      .topbar { display: grid; }
+      .status-grid, .test-grid, .config, .row { grid-template-columns: 1fr; }
+      .config .actions { grid-column: auto; }
+      .footer { display: grid; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <h1>vLLM On-Demand</h1>
+        <p class="subtitle">OpenAI-compatible API · RTX PRO 6000 Blackwell · model stays unloaded until requested</p>
+      </div>
+      <div id="stateBadge" class="badge state-unloaded"><span class="dot"></span><span id="stateLabel">Connecting…</span></div>
+    </header>
+
+    <section class="panel status-panel">
+      <div class="status-grid">
+        <div class="metric"><span>Model state</span><strong id="metricState">—</strong></div>
+        <div class="metric"><span>Process ID</span><strong id="metricPid">—</strong></div>
+        <div class="metric"><span>In flight</span><strong id="metricInflight">—</strong></div>
+        <div class="metric"><span>Idle / unload</span><strong id="metricIdle">—</strong></div>
+        <div class="metric"><span>VRAM guard</span><strong id="metricVram">—</strong></div>
+        <div class="metric"><span>Comfy handoff</span><strong id="metricComfy">—</strong></div>
+      </div>
+      <div id="statusError" class="status-error"></div>
+    </section>
+
+    <section class="panel config">
+      <label>Model name
+        <input id="model" value="" spellcheck="false">
+      </label>
+      <label>API key <span class="hint">Leave blank when authentication is disabled</span>
+        <input id="apiKey" type="password" autocomplete="off" placeholder="Optional bearer token">
+      </label>
+      <div class="actions">
+        <button id="loadButton" class="primary" onclick="loadModel(this)">Load model</button>
+        <button id="unloadButton" class="danger" onclick="unloadModel(this)">Unload</button>
+        <a class="button-link" href="/vllm/docs" title="Loads the model before opening upstream Swagger">vLLM Swagger</a>
+      </div>
+    </section>
+
+    <section class="test-grid">
+      <article class="panel test-card">
+        <div class="card-head">
+          <div><h2>Connection and models</h2><p>Calls the standard OpenAI model-list endpoint. This wakes vLLM.</p></div>
+          <button onclick="testModels(this)">Run test</button>
+        </div>
+        <p class="hint"><code>GET /v1/models</code></p>
+      </article>
+
+      <article class="panel test-card">
+        <div class="card-head">
+          <div><h2>Chat completion</h2><p>Simple non-streaming text generation with optional Qwen thinking.</p></div>
+          <button class="primary" onclick="testChat(this)">Generate</button>
+        </div>
+        <div class="fields">
+          <label>Prompt<textarea id="chatPrompt">Reply with exactly: vLLM dashboard ready</textarea></label>
+          <div class="row">
+            <label>Maximum tokens<input id="chatMaxTokens" type="number" min="1" max="8192" value="128"></label>
+            <label class="toggle"><input id="chatThinking" type="checkbox"> Enable thinking</label>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel test-card">
+        <div class="card-head">
+          <div><h2>Tool calling</h2><p>Checks automatic function selection and parsed OpenAI tool calls.</p></div>
+          <button onclick="testTools(this)">Run tool test</button>
+        </div>
+        <div class="fields">
+          <label>User request<textarea id="toolPrompt">What is the current weather in Paris? Use the available weather function.</textarea></label>
+          <p class="hint">Advertises a strict <code>get_weather(location)</code> function with <code>tool_choice: auto</code>.</p>
+        </div>
+      </article>
+
+      <article class="panel test-card">
+        <div class="card-head">
+          <div><h2>Vision input</h2><p>Sends one local image as an OpenAI base64 image URL.</p></div>
+          <button onclick="testVision(this)">Analyze image</button>
+        </div>
+        <div class="fields">
+          <label>Image<input id="visionFile" class="file" type="file" accept="image/*"></label>
+          <label>Prompt<textarea id="visionPrompt">Describe this image concisely.</textarea></label>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel output-panel">
+      <div class="output-head">
+        <div><strong>Test output</strong> <span id="outputMeta" class="output-meta">No request yet</span></div>
+        <button onclick="copyOutput()">Copy</button>
+      </div>
+      <pre id="output">Choose a test above. The first /v1 request may wait while the model loads from disk.</pre>
+    </section>
+
+    <footer class="footer">
+      <span>Dashboard and status polling never wake the model.</span>
+      <span>API base: <code id="baseUrl"></code> · <a href="/on-demand/status">raw status</a></span>
+    </footer>
+  </main>
+
+  <script>
+    const defaultModel = __DEFAULT_MODEL_JSON__;
+    const output = document.getElementById('output');
+    const outputMeta = document.getElementById('outputMeta');
+    document.getElementById('model').value = defaultModel;
+    document.getElementById('baseUrl').textContent = `${location.origin}/v1`;
+
+    function authHeaders(json = false) {
+      const headers = {};
+      const key = document.getElementById('apiKey').value.trim();
+      if (key) headers.Authorization = `Bearer ${key}`;
+      if (json) headers['Content-Type'] = 'application/json';
+      return headers;
+    }
+
+    function pretty(value) {
+      return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    }
+
+    function setBusy(button, busy) {
+      if (!button) return;
+      if (busy) {
+        button.dataset.label = button.textContent;
+        button.textContent = 'Working…';
+        button.disabled = true;
+      } else {
+        button.textContent = button.dataset.label || button.textContent;
+        button.disabled = false;
+      }
+    }
+
+    async function runRequest(label, path, options = {}, button = null) {
+      setBusy(button, true);
+      const started = performance.now();
+      output.textContent = `${label} in progress…`;
+      outputMeta.textContent = 'request running';
+      try {
+        const response = await fetch(path, options);
+        const text = await response.text();
+        let body;
+        try { body = JSON.parse(text); } catch { body = text; }
+        const elapsed = ((performance.now() - started) / 1000).toFixed(2);
+        outputMeta.textContent = `HTTP ${response.status} · ${elapsed}s`;
+        output.textContent = pretty(body);
+        await refreshStatus();
+        return { response, body };
+      } catch (error) {
+        const elapsed = ((performance.now() - started) / 1000).toFixed(2);
+        outputMeta.textContent = `network error · ${elapsed}s`;
+        output.textContent = String(error);
+        throw error;
+      } finally {
+        setBusy(button, false);
+      }
+    }
+
+    async function refreshStatus() {
+      try {
+        const response = await fetch('/on-demand/status', { cache: 'no-store' });
+        const status = await response.json();
+        const state = status.state || 'unknown';
+        document.getElementById('stateBadge').className = `badge state-${state}`;
+        document.getElementById('stateLabel').textContent = state;
+        document.getElementById('metricState').textContent = state;
+        document.getElementById('metricPid').textContent = status.pid ?? 'none';
+        document.getElementById('metricInflight').textContent = status.inflight_requests ?? 0;
+        const remaining = Math.max(0, Number(status.idle_timeout_seconds || 0) - Number(status.idle_seconds || 0));
+        document.getElementById('metricIdle').textContent = state === 'ready' ? `${Math.ceil(remaining)}s left` : `${status.idle_timeout_seconds}s`;
+        document.getElementById('metricVram').textContent = status.minimum_free_vram_mib ? `${status.minimum_free_vram_mib} MiB` : 'disabled';
+        document.getElementById('metricComfy').textContent = status.comfyui_auto_release ? 'idle release on' : 'disabled';
+        const error = document.getElementById('statusError');
+        error.textContent = status.last_error || '';
+        error.style.display = status.last_error ? 'block' : 'none';
+      } catch (error) {
+        document.getElementById('stateLabel').textContent = 'controller offline';
+        document.getElementById('stateBadge').className = 'badge state-error';
+      }
+    }
+
+    async function loadModel(button) {
+      await runRequest('Load model', '/on-demand/load', { method: 'POST', headers: authHeaders() }, button);
+    }
+
+    async function unloadModel(button) {
+      await runRequest('Unload model', '/on-demand/unload', { method: 'POST', headers: authHeaders() }, button);
+    }
+
+    async function testModels(button) {
+      const result = await runRequest('List models', '/v1/models', { headers: authHeaders() }, button);
+      const discovered = result.body?.data?.[0]?.id;
+      if (discovered) document.getElementById('model').value = discovered;
+    }
+
+    async function testChat(button) {
+      const body = {
+        model: document.getElementById('model').value.trim(),
+        messages: [{ role: 'user', content: document.getElementById('chatPrompt').value }],
+        max_tokens: Number(document.getElementById('chatMaxTokens').value),
+        temperature: 0,
+        chat_template_kwargs: { enable_thinking: document.getElementById('chatThinking').checked }
+      };
+      await runRequest('Chat completion', '/v1/chat/completions', {
+        method: 'POST', headers: authHeaders(true), body: JSON.stringify(body)
+      }, button);
+    }
+
+    async function testTools(button) {
+      const body = {
+        model: document.getElementById('model').value.trim(),
+        messages: [{ role: 'user', content: document.getElementById('toolPrompt').value }],
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'get_weather',
+            description: 'Return the current weather for a location.',
+            strict: true,
+            parameters: {
+              type: 'object',
+              properties: { location: { type: 'string', description: 'City and country' } },
+              required: ['location'],
+              additionalProperties: false
+            }
+          }
+        }],
+        tool_choice: 'auto',
+        max_tokens: 512,
+        temperature: 0,
+        chat_template_kwargs: { enable_thinking: false }
+      };
+      await runRequest('Tool calling', '/v1/chat/completions', {
+        method: 'POST', headers: authHeaders(true), body: JSON.stringify(body)
+      }, button);
+    }
+
+    function readFileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function testVision(button) {
+      const file = document.getElementById('visionFile').files[0];
+      if (!file) {
+        outputMeta.textContent = 'image required';
+        output.textContent = 'Choose an image before running the vision test.';
+        return;
+      }
+      setBusy(button, true);
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        const body = {
+          model: document.getElementById('model').value.trim(),
+          messages: [{ role: 'user', content: [
+            { type: 'image_url', image_url: { url: dataUrl } },
+            { type: 'text', text: document.getElementById('visionPrompt').value }
+          ] }],
+          max_tokens: 512,
+          temperature: 0,
+          chat_template_kwargs: { enable_thinking: false }
+        };
+        await runRequest('Vision completion', '/v1/chat/completions', {
+          method: 'POST', headers: authHeaders(true), body: JSON.stringify(body)
+        });
+      } finally {
+        setBusy(button, false);
+      }
+    }
+
+    async function copyOutput() {
+      await navigator.clipboard.writeText(output.textContent);
+      outputMeta.textContent = `${outputMeta.textContent} · copied`;
+    }
+
+    refreshStatus();
+    setInterval(refreshStatus, 2000);
+  </script>
+</body>
+</html>

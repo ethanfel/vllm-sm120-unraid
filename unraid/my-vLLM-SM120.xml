@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>vLLM</Name>
-  <Repository>ghcr.io/ethanfel/vllm-sm120-unraid:0.1.0</Repository>
+  <Repository>ghcr.io/ethanfel/vllm-sm120-unraid:0.1.1</Repository>
   <Registry>https://github.com/ethanfel/vllm-sm120-unraid/pkgs/container/vllm-sm120-unraid</Registry>
   <Network>bridge</Network>
   <MyIP/>
@@ -12,7 +12,7 @@
   <ReadMe>SM120-tuned, wake-on-request vLLM OpenAI-compatible server for an RTX PRO 6000 Blackwell. The model fully unloads after the configured idle timeout, releasing VRAM and model-owned RAM.</ReadMe>
   <Overview>On-demand vLLM 0.26.0 OpenAI-compatible API, configured for RTX PRO 6000 Blackwell (SM120) and Qwen3.6-27B.</Overview>
   <Category>AI:</Category>
-  <WebUI>http://[IP]:[PORT:8000]/on-demand/status</WebUI>
+  <WebUI>http://[IP]:[PORT:8000]/</WebUI>
   <Icon>https://i.imgur.com/oQcntuY.png</Icon>
   <ExtraParams>--runtime=nvidia --gpus=all --ipc=host --add-host=host.docker.internal:host-gateway</ExtraParams>
   <PostArgs/>

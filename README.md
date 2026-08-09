@@ -8,7 +8,7 @@ The model repository is a 55.6 GB BF16 checkpoint with native 262,144-token cont
 Published image:
 
 ```text
-ghcr.io/ethanfel/vllm-sm120-unraid:0.1.0
+ghcr.io/ethanfel/vllm-sm120-unraid:0.1.1
 ```
 
 ## Install on Unraid
@@ -37,6 +37,8 @@ The container itself starts with the model unloaded. The first `/v1` request dow
 ```bash
 docker logs -f vLLM
 ```
+
+Open the container's **WebUI** from Unraid for the interactive dashboard. It shows live lifecycle status and includes one-click tests for model discovery, chat completion, automatic tool calling, and local image input. Opening the dashboard and its `/docs` alias does not load the model; pressing **Load model**, opening **vLLM Swagger**, or running an API test does.
 
 ## ComfyUI / OpenAI-compatible clients
 
@@ -83,7 +85,7 @@ curl -X POST http://192.168.1.12:8000/on-demand/load
 curl -X POST http://192.168.1.12:8000/on-demand/unload
 ```
 
-If `API_KEY` is configured, the load and unload endpoints require the same bearer token. Status and health do not start the model. Opening `/docs`, querying `/v1/models`, or making any other `/v1` request does start it. Set `IDLE_TIMEOUT_SECONDS` to change the default ten-minute delay, or set `ENABLE_ON_DEMAND=false` for the original always-loaded behavior.
+If `API_KEY` is configured, the load and unload endpoints require the same bearer token. The dashboard, `/docs`, status, and health do not start the model. Opening `/vllm/docs`, querying `/v1/models`, or making any other `/v1` request does start it. Set `IDLE_TIMEOUT_SECONDS` to change the default ten-minute delay, or set `ENABLE_ON_DEMAND=false` for the original always-loaded behavior.
 
 Before launching vLLM, the controller requires 90,000 MiB of free VRAM by default. This prevents an LLM request from destabilizing an active ComfyUI render. If VRAM is low, it checks `COMFYUI_BASE_URL`: when Comfy's queue is completely idle it calls the supported `/free` endpoint and waits for cached models to be released; when a job is running or queued it returns `503` without interrupting anything.
 
@@ -100,7 +102,7 @@ The Linux filesystem cache may retain recently read model files after unload. Th
 
 ## Publishing
 
-Tagged releases are validated and published by GitHub Actions to GHCR. The `v0.1.0` tag produces immutable `0.1.0`, moving `0.1`, and commit-SHA image tags. The workflow uses GitHub's package token; no registry credential is stored in this repository.
+Tagged releases are validated and published by GitHub Actions to GHCR. The `v0.1.1` tag produces immutable `0.1.1`, moving `0.1`, and commit-SHA image tags. The workflow uses GitHub's package token; no registry credential is stored in this repository.
 
 For a local development build:
 

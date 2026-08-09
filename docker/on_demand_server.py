@@ -11,17 +11,19 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import signal
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import AsyncIterator
 
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 
 LOG = logging.getLogger("vllm.on_demand")
@@ -35,6 +37,12 @@ HOP_BY_HOP_HEADERS = {
     "transfer-encoding",
     "upgrade",
 }
+DASHBOARD_PATH = Path(
+    os.getenv(
+        "ON_DEMAND_DASHBOARD_PATH",
+        "/usr/local/share/vllm-on-demand/dashboard.html",
+    )
+)
 
 
 class ModelUnavailable(RuntimeError):
@@ -354,13 +362,22 @@ def create_app(controller: ModelController) -> FastAPI:
         if request.headers.get("authorization") != expected:
             raise HTTPException(status_code=401, detail="Invalid control API key")
 
-    @app.get("/")
-    async def root() -> dict[str, object]:
-        return {
-            "service": "vLLM on-demand controller",
-            "openai_base_url": "/v1",
-            **await controller.snapshot(),
-        }
+    def dashboard_response() -> HTMLResponse:
+        dashboard_path = DASHBOARD_PATH
+        if not dashboard_path.is_file():
+            dashboard_path = Path(__file__).with_name("dashboard.html")
+        template = dashboard_path.read_text(encoding="utf-8")
+        model_name = os.getenv("SERVED_MODEL_NAME", "qwen3.6-27b-fable")
+        page = template.replace("__DEFAULT_MODEL_JSON__", json.dumps(model_name))
+        return HTMLResponse(page, headers={"Cache-Control": "no-store"})
+
+    @app.get("/", response_class=HTMLResponse)
+    async def root() -> HTMLResponse:
+        return dashboard_response()
+
+    @app.get("/docs", response_class=HTMLResponse)
+    async def dashboard_docs_alias() -> HTMLResponse:
+        return dashboard_response()
 
     @app.get("/health")
     async def health() -> dict[str, object]:
@@ -392,7 +409,9 @@ def create_app(controller: ModelController) -> FastAPI:
             )
         return await controller.snapshot()
 
-    async def proxy_openai_request(request: Request) -> Response:
+    async def proxy_request(
+        request: Request, upstream_path: str | None = None
+    ) -> Response:
         try:
             await controller.begin_request()
         except ModelUnavailable as exc:
@@ -402,7 +421,7 @@ def create_app(controller: ModelController) -> FastAPI:
         response: httpx.Response | None = None
         try:
             body = await request.body()
-            upstream = f"{controller.upstream_url}{request.url.path}"
+            upstream = f"{controller.upstream_url}{upstream_path or request.url.path}"
             if request.url.query:
                 upstream = f"{upstream}?{request.url.query}"
             headers = {
@@ -452,11 +471,18 @@ def create_app(controller: ModelController) -> FastAPI:
             headers=response_headers,
         )
 
+    async def proxy_openai_request(request: Request) -> Response:
+        return await proxy_request(request)
+
     methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
     app.add_api_route("/v1", proxy_openai_request, methods=methods)
     app.add_api_route("/v1/{path:path}", proxy_openai_request, methods=methods)
-    app.add_api_route("/docs", proxy_openai_request, methods=["GET"])
     app.add_api_route("/openapi.json", proxy_openai_request, methods=["GET"])
+
+    async def proxy_vllm_docs(request: Request) -> Response:
+        return await proxy_request(request, upstream_path="/docs")
+
+    app.add_api_route("/vllm/docs", proxy_vllm_docs, methods=["GET"])
     return app
 
 
