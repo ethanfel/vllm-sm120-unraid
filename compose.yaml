@@ -1,6 +1,6 @@
 services:
   vllm:
-    image: ghcr.io/ethanfel/vllm-sm120-unraid:0.1.1
+    image: ghcr.io/ethanfel/vllm-sm120-unraid:0.2.0
     container_name: vLLM
     runtime: nvidia
     gpus: all
@@ -33,6 +33,7 @@ services:
       COMFYUI_BASE_URL: ${COMFYUI_BASE_URL:-http://host.docker.internal:8188}
       COMFYUI_FREE_TIMEOUT_SECONDS: ${COMFYUI_FREE_TIMEOUT_SECONDS:-120}
       VLLM_INTERNAL_PORT: ${VLLM_INTERNAL_PORT:-8001}
+      MODEL_CACHE_DELETE_ENABLED: ${MODEL_CACHE_DELETE_ENABLED:-true}
       ENABLE_PREFIX_CACHING: ${ENABLE_PREFIX_CACHING:-true}
       ENABLE_TOOLS: ${ENABLE_TOOLS:-true}
       TOOL_CALL_PARSER: ${TOOL_CALL_PARSER:-qwen3_coder}

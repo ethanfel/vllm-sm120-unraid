@@ -14,6 +14,7 @@ import contextlib
 import json
 import logging
 import os
+import shutil
 import signal
 import time
 from dataclasses import dataclass, field
@@ -49,6 +50,110 @@ class ModelUnavailable(RuntimeError):
     pass
 
 
+def _repo_id_from_cache_name(name: str) -> str | None:
+    """Decode Hugging Face's models--owner--repo cache directory name."""
+    prefix = "models--"
+    if not name.startswith(prefix):
+        return None
+    encoded = name[len(prefix) :]
+    if "--" not in encoded:
+        return None
+    owner, repository = encoded.split("--", 1)
+    if not owner or not repository:
+        return None
+    return f"{owner}/{repository}"
+
+
+def _directory_size_bytes(path: Path) -> int:
+    total = 0
+    for root, directories, files in os.walk(path, followlinks=False):
+        root_path = Path(root)
+        for name in directories + files:
+            item = root_path / name
+            try:
+                total += item.lstat().st_size
+            except FileNotFoundError:
+                # A concurrent Hugging Face download can atomically replace files.
+                continue
+    return total
+
+
+def _disk_usage_for(path: Path):
+    candidate = path
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+    return shutil.disk_usage(candidate)
+
+
+def scan_model_cache(
+    cache_root: Path, configured_model_id: str
+) -> dict[str, object]:
+    models: list[dict[str, object]] = []
+    if cache_root.is_dir():
+        for entry in sorted(cache_root.iterdir(), key=lambda item: item.name.lower()):
+            if entry.is_symlink() or not entry.is_dir():
+                continue
+            repo_id = _repo_id_from_cache_name(entry.name)
+            if repo_id is None:
+                continue
+            try:
+                modified_at = entry.stat().st_mtime
+            except FileNotFoundError:
+                continue
+            models.append(
+                {
+                    "repo_id": repo_id,
+                    "cache_key": entry.name,
+                    "size_bytes": _directory_size_bytes(entry),
+                    "modified_at": modified_at,
+                    "configured": repo_id == configured_model_id,
+                }
+            )
+
+    usage = _disk_usage_for(cache_root)
+    return {
+        "cache_root": str(cache_root),
+        "configured_model": configured_model_id,
+        "delete_enabled": True,
+        "models": models,
+        "storage": {
+            "total_bytes": usage.total,
+            "used_bytes": usage.used,
+            "free_bytes": usage.free,
+            "model_bytes": sum(int(model["size_bytes"]) for model in models),
+        },
+    }
+
+
+def delete_cached_model(
+    cache_root: Path, repo_id: str, configured_model_id: str
+) -> dict[str, object]:
+    if repo_id == configured_model_id:
+        raise ValueError("The configured model cannot be deleted")
+
+    target: Path | None = None
+    size_bytes = 0
+    if cache_root.is_dir():
+        for entry in cache_root.iterdir():
+            if entry.is_symlink() or not entry.is_dir():
+                continue
+            if _repo_id_from_cache_name(entry.name) == repo_id:
+                target = entry
+                size_bytes = _directory_size_bytes(entry)
+                break
+
+    if target is None:
+        raise FileNotFoundError(f"Cached model not found: {repo_id}")
+
+    resolved_root = cache_root.resolve()
+    resolved_target = target.resolve()
+    if resolved_target.parent != resolved_root:
+        raise ValueError("Refusing to delete a path outside the model cache")
+
+    shutil.rmtree(resolved_target)
+    return {"repo_id": repo_id, "deleted": True, "freed_bytes": size_bytes}
+
+
 @dataclass
 class ModelController:
     command: list[str]
@@ -60,6 +165,9 @@ class ModelController:
     comfyui_base_url: str = ""
     comfyui_free_timeout: float = 120.0
     control_key: str = ""
+    model_cache_root: Path = Path("/models/hub")
+    configured_model_id: str = ""
+    model_cache_delete_enabled: bool = True
     state: str = "unloaded"
     process: asyncio.subprocess.Process | None = None
     inflight: int = 0
@@ -338,6 +446,29 @@ class ModelController:
                 "last_error": self.last_error,
             }
 
+    async def cached_models(self) -> dict[str, object]:
+        snapshot = await asyncio.to_thread(
+            scan_model_cache, self.model_cache_root, self.configured_model_id
+        )
+        snapshot["delete_enabled"] = self.model_cache_delete_enabled
+        return snapshot
+
+    async def delete_cached_model(self, repo_id: str) -> dict[str, object]:
+        if not self.model_cache_delete_enabled:
+            raise PermissionError("Model-cache deletion is disabled")
+        async with self.transition_lock:
+            async with self.state_lock:
+                if self.state in {"loading", "stopping"}:
+                    raise ModelUnavailable(
+                        f"Cannot delete cached models while vLLM is {self.state}"
+                    )
+            return await asyncio.to_thread(
+                delete_cached_model,
+                self.model_cache_root,
+                repo_id,
+                self.configured_model_id,
+            )
+
 
 def create_app(controller: ModelController) -> FastAPI:
     @contextlib.asynccontextmanager
@@ -408,6 +539,41 @@ def create_app(controller: ModelController) -> FastAPI:
                 status_code=409, detail="Cannot unload while requests are in flight"
             )
         return await controller.snapshot()
+
+    @app.get("/on-demand/models")
+    async def cached_models(request: Request) -> dict[str, object]:
+        require_control_access(request)
+        return await controller.cached_models()
+
+    @app.post("/on-demand/models/delete")
+    async def remove_cached_model(request: Request) -> dict[str, object]:
+        require_control_access(request)
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="A JSON body is required") from exc
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="A JSON object is required")
+        repo_id = body.get("repo_id")
+        confirmation = body.get("confirmation")
+        if not isinstance(repo_id, str) or not repo_id.strip():
+            raise HTTPException(status_code=400, detail="repo_id is required")
+        repo_id = repo_id.strip()
+        if confirmation != repo_id:
+            raise HTTPException(
+                status_code=400,
+                detail="confirmation must exactly match repo_id",
+            )
+        try:
+            return await controller.delete_cached_model(repo_id)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ModelUnavailable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     async def proxy_request(
         request: Request, upstream_path: str | None = None
@@ -518,6 +684,10 @@ def main() -> None:
         level=os.getenv("ON_DEMAND_LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    hf_home = Path(os.getenv("HF_HOME", str(Path.home() / ".cache" / "huggingface")))
+    model_cache_root = Path(
+        os.getenv("HUGGINGFACE_HUB_CACHE", str(hf_home / "hub"))
+    )
     controller = ModelController(
         command=args.vllm_command,
         upstream_port=args.upstream_port,
@@ -528,6 +698,12 @@ def main() -> None:
         comfyui_base_url=args.comfyui_base_url,
         comfyui_free_timeout=args.comfyui_free_timeout,
         control_key=os.getenv("ON_DEMAND_CONTROL_KEY", os.getenv("API_KEY", "")),
+        model_cache_root=model_cache_root,
+        configured_model_id=os.getenv("MODEL_ID", ""),
+        model_cache_delete_enabled=os.getenv(
+            "MODEL_CACHE_DELETE_ENABLED", "true"
+        ).lower()
+        in {"1", "true", "yes", "on"},
     )
     app = create_app(controller)
     uvicorn.run(

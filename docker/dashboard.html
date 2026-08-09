@@ -83,6 +83,20 @@
     button.primary:hover { background: #0d9488; }
     button.danger { background: #881337; border-color: #be123c; }
 
+    .model-manager { margin-bottom: 18px; padding: 18px; }
+    .model-manager-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 14px; }
+    .model-manager-head p, .storage-summary { color: var(--muted); font-size: 13px; }
+    .storage-summary { margin-bottom: 10px; }
+    .model-list { display: grid; gap: 8px; }
+    .model-row {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 14px; align-items: center;
+      padding: 12px 14px; border: 1px solid rgb(38 50 71 / 75%); border-radius: 12px; background: rgb(8 11 18 / 45%);
+    }
+    .model-name { min-width: 0; font-weight: 650; overflow-wrap: anywhere; }
+    .model-detail { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .model-tag { display: inline-flex; margin-left: 8px; padding: 2px 7px; border-radius: 999px; color: #a7f3d0; background: rgb(15 118 110 / 28%); border: 1px solid rgb(20 184 166 / 35%); font-size: 11px; }
+    .empty-models { color: var(--muted); padding: 14px; border: 1px dashed var(--border); border-radius: 12px; }
+
     .test-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
     .test-card { padding: 18px; }
     .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
@@ -112,6 +126,8 @@
       .shell { width: min(100% - 20px, 1440px); padding-top: 20px; }
       .topbar { display: grid; }
       .status-grid, .test-grid, .config, .row { grid-template-columns: 1fr; }
+      .model-row { grid-template-columns: 1fr auto; }
+      .model-row .model-size { grid-row: 2; }
       .config .actions { grid-column: auto; }
       .footer { display: grid; }
     }
@@ -151,6 +167,18 @@
         <button id="unloadButton" class="danger" onclick="unloadModel(this)">Unload</button>
         <a class="button-link" href="/vllm/docs" title="Loads the model before opening upstream Swagger">vLLM Swagger</a>
       </div>
+    </section>
+
+    <section class="panel model-manager">
+      <div class="model-manager-head">
+        <div>
+          <h2>Cached models</h2>
+          <p>Review model checkpoints stored on disk. This does not load or wake vLLM.</p>
+        </div>
+        <button onclick="refreshModels(this)">Refresh storage</button>
+      </div>
+      <div id="modelStorageSummary" class="storage-summary">Reading model cache…</div>
+      <div id="modelList" class="model-list"><div class="empty-models">Loading cached models…</div></div>
     </section>
 
     <section class="test-grid">
@@ -232,6 +260,23 @@
       return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     }
 
+    function formatBytes(value) {
+      const bytes = Number(value || 0);
+      if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+      const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+      const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+      return `${(bytes / (1024 ** index)).toFixed(index > 2 ? 1 : 0)} ${units[index]}`;
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
     function setBusy(button, busy) {
       if (!button) return;
       if (busy) {
@@ -298,6 +343,60 @@
 
     async function unloadModel(button) {
       await runRequest('Unload model', '/on-demand/unload', { method: 'POST', headers: authHeaders() }, button);
+    }
+
+    async function refreshModels(button = null) {
+      setBusy(button, true);
+      const list = document.getElementById('modelList');
+      const summary = document.getElementById('modelStorageSummary');
+      try {
+        const response = await fetch('/on-demand/models', { headers: authHeaders(), cache: 'no-store' });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || `HTTP ${response.status}`);
+        const storage = body.storage || {};
+        summary.textContent = `${body.models.length} model(s) · ${formatBytes(storage.model_bytes)} in model cache · ${formatBytes(storage.free_bytes)} free on volume`;
+        if (!body.models.length) {
+          list.innerHTML = '<div class="empty-models">No Hugging Face model checkpoints are cached.</div>';
+          return;
+        }
+        list.innerHTML = body.models.map(model => {
+          const repo = escapeHtml(model.repo_id);
+          const configured = model.configured ? '<span class="model-tag">configured</span>' : '';
+          const disabled = model.configured || !body.delete_enabled;
+          const title = model.configured
+            ? 'The configured model cannot be deleted'
+            : (body.delete_enabled ? 'Delete this cached checkpoint' : 'Cache deletion is disabled');
+          return `<div class="model-row">
+            <div><div class="model-name">${repo}${configured}</div><div class="model-detail">Last changed ${new Date(model.modified_at * 1000).toLocaleString()}</div></div>
+            <div class="model-size">${formatBytes(model.size_bytes)}</div>
+            <button class="danger" title="${title}" ${disabled ? 'disabled' : ''} onclick="deleteModel('${repo.replaceAll("'", '&#039;')}', this)">Delete</button>
+          </div>`;
+        }).join('');
+      } catch (error) {
+        summary.textContent = 'Unable to read model cache';
+        list.innerHTML = `<div class="empty-models">${escapeHtml(error)}</div>`;
+      } finally {
+        setBusy(button, false);
+      }
+    }
+
+    async function deleteModel(repoId, button) {
+      const confirmation = window.prompt(
+        `Delete ${repoId} from the local Hugging Face cache?\n\nThis releases disk space but the files must be downloaded again if needed.\n\nType the full model name to confirm:`,
+        ''
+      );
+      if (confirmation === null) return;
+      if (confirmation !== repoId) {
+        outputMeta.textContent = 'deletion cancelled';
+        output.textContent = 'The confirmation did not exactly match the model name. Nothing was deleted.';
+        return;
+      }
+      const result = await runRequest(`Delete ${repoId}`, '/on-demand/models/delete', {
+        method: 'POST',
+        headers: authHeaders(true),
+        body: JSON.stringify({ repo_id: repoId, confirmation })
+      }, button);
+      if (result.response.ok) await refreshModels();
     }
 
     async function testModels(button) {
@@ -390,6 +489,7 @@
     }
 
     refreshStatus();
+    refreshModels();
     setInterval(refreshStatus, 2000);
   </script>
 </body>

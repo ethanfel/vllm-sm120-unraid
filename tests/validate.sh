@@ -55,7 +55,7 @@ import xml.etree.ElementTree as ET
 path = sys.argv[1]
 root = ET.parse(path).getroot()
 assert root.tag == "Container"
-assert root.findtext("Repository") == "ghcr.io/ethanfel/vllm-sm120-unraid:0.1.1"
+assert root.findtext("Repository") == "ghcr.io/ethanfel/vllm-sm120-unraid:0.2.0"
 assert root.findtext("WebUI") == "http://[IP]:[PORT:8000]/"
 targets = {node.attrib.get("Target") for node in root.findall("Config")}
 required = {
@@ -63,6 +63,7 @@ required = {
     "ENABLE_ON_DEMAND", "IDLE_TIMEOUT_SECONDS", "VLLM_INTERNAL_PORT",
     "MIN_FREE_VRAM_MIB",
     "COMFYUI_BASE_URL",
+    "MODEL_CACHE_DELETE_ENABLED",
     "TOOL_CALL_PARSER",
 }
 missing = required - targets
@@ -72,7 +73,7 @@ PY
 else
   template="${repo_dir}/unraid/my-vLLM-SM120.xml"
   grep -Fq '<Container version="2">' "${template}"
-  grep -Fq '<Repository>ghcr.io/ethanfel/vllm-sm120-unraid:0.1.1</Repository>' "${template}"
+  grep -Fq '<Repository>ghcr.io/ethanfel/vllm-sm120-unraid:0.2.0</Repository>' "${template}"
   grep -Fq '<WebUI>http://[IP]:[PORT:8000]/</WebUI>' "${template}"
   grep -Fq 'Target="MODEL_ID"' "${template}"
   grep -Fq 'Target="SERVED_MODEL_NAME"' "${template}"

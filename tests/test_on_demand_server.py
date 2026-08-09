@@ -4,6 +4,7 @@ import asyncio
 import importlib.util
 import socket
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -27,6 +28,82 @@ def unused_port() -> int:
 
 
 class OnDemandServerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cached_models_can_be_listed_and_only_unused_models_deleted(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            cache_root = Path(temporary_directory) / "hub"
+            current = cache_root / "models--owner--current"
+            unused = cache_root / "models--owner--unused-model"
+            (current / "blobs").mkdir(parents=True)
+            (unused / "blobs").mkdir(parents=True)
+            (current / "blobs" / "weights").write_bytes(b"current")
+            (unused / "blobs" / "weights").write_bytes(b"unused-weights")
+
+            controller = MODULE.ModelController(
+                command=[sys.executable, "-c", "raise SystemExit(99)"],
+                upstream_port=unused_port(),
+                idle_timeout=10.0,
+                load_timeout=5.0,
+                stop_timeout=2.0,
+                model_cache_root=cache_root,
+                configured_model_id="owner/current",
+            )
+            app = MODULE.create_app(controller)
+            await controller.start()
+            try:
+                transport = httpx.ASGITransport(app=app)
+                async with httpx.AsyncClient(
+                    transport=transport, base_url="http://controller"
+                ) as client:
+                    listed = await client.get("/on-demand/models")
+                    self.assertEqual(listed.status_code, 200)
+                    self.assertIsNone(controller.process)
+                    models = {
+                        model["repo_id"]: model for model in listed.json()["models"]
+                    }
+                    self.assertEqual(set(models), {"owner/current", "owner/unused-model"})
+                    self.assertTrue(models["owner/current"]["configured"])
+                    self.assertFalse(models["owner/unused-model"]["configured"])
+                    self.assertGreater(models["owner/unused-model"]["size_bytes"], 0)
+
+                    bad_confirmation = await client.post(
+                        "/on-demand/models/delete",
+                        json={"repo_id": "owner/unused-model", "confirmation": "no"},
+                    )
+                    self.assertEqual(bad_confirmation.status_code, 400)
+                    self.assertTrue(unused.is_dir())
+
+                    traversal = await client.post(
+                        "/on-demand/models/delete",
+                        json={"repo_id": "../../outside", "confirmation": "../../outside"},
+                    )
+                    self.assertEqual(traversal.status_code, 404)
+                    self.assertTrue(unused.is_dir())
+
+                    configured = await client.post(
+                        "/on-demand/models/delete",
+                        json={
+                            "repo_id": "owner/current",
+                            "confirmation": "owner/current",
+                        },
+                    )
+                    self.assertEqual(configured.status_code, 409)
+                    self.assertTrue(current.is_dir())
+
+                    deleted = await client.post(
+                        "/on-demand/models/delete",
+                        json={
+                            "repo_id": "owner/unused-model",
+                            "confirmation": "owner/unused-model",
+                        },
+                    )
+                    self.assertEqual(deleted.status_code, 200)
+                    self.assertTrue(deleted.json()["deleted"])
+                    self.assertFalse(unused.exists())
+                    self.assertTrue(current.is_dir())
+                    self.assertIsNone(controller.process)
+            finally:
+                await controller.close()
+
     async def test_active_comfy_queue_is_never_interrupted(self) -> None:
         controller = MODULE.ModelController(
             command=[sys.executable, "-c", "raise SystemExit(99)"],

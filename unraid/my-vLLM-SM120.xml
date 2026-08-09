@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>vLLM</Name>
-  <Repository>ghcr.io/ethanfel/vllm-sm120-unraid:0.1.1</Repository>
+  <Repository>ghcr.io/ethanfel/vllm-sm120-unraid:0.2.0</Repository>
   <Registry>https://github.com/ethanfel/vllm-sm120-unraid/pkgs/container/vllm-sm120-unraid</Registry>
   <Network>bridge</Network>
   <MyIP/>
@@ -38,6 +38,7 @@
   <Config Name="ComfyUI URL" Target="COMFYUI_BASE_URL" Default="http://host.docker.internal:8188" Mode="" Description="When VRAM is low, release Comfy cached models only if its queue is completely idle; blank disables" Type="Variable" Display="advanced" Required="false" Mask="false">http://host.docker.internal:8188</Config>
   <Config Name="Comfy release timeout" Target="COMFYUI_FREE_TIMEOUT_SECONDS" Default="120" Mode="" Description="Maximum seconds to wait for idle ComfyUI to release cached VRAM" Type="Variable" Display="advanced" Required="true" Mask="false">120</Config>
   <Config Name="Private vLLM port" Target="VLLM_INTERNAL_PORT" Default="8001" Mode="" Description="Loopback-only upstream port; do not publish it" Type="Variable" Display="advanced" Required="true" Mask="false">8001</Config>
+  <Config Name="Allow cached-model deletion" Target="MODEL_CACHE_DELETE_ENABLED" Default="true" Mode="" Description="Allow the dashboard to delete unused Hugging Face checkpoints after explicit name confirmation; false keeps the model list read-only" Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
   <Config Name="Multimodal limits" Target="LIMIT_MM_PER_PROMPT" Default="{&quot;image&quot;:4,&quot;video&quot;:0}" Mode="" Description="JSON limits for image/video inputs" Type="Variable" Display="advanced" Required="true" Mask="false">{&quot;image&quot;:4,&quot;video&quot;:0}</Config>
   <Config Name="Default chat-template options" Target="DEFAULT_CHAT_TEMPLATE_KWARGS" Default="{&quot;enable_thinking&quot;:true,&quot;preserve_thinking&quot;:true}" Mode="" Description="Preserve Qwen thinking across multi-turn agent conversations, as recommended in the linked working recipe" Type="Variable" Display="advanced" Required="true" Mask="false">{&quot;enable_thinking&quot;:true,&quot;preserve_thinking&quot;:true}</Config>
   <Config Name="Prefix caching" Target="ENABLE_PREFIX_CACHING" Default="true" Mode="" Description="Reuse common prompt prefixes" Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
