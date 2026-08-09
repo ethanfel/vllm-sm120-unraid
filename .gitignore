@@ -1,0 +1,4 @@
+.env
+.gitrepo/
+__pycache__/
+*.py[cod]

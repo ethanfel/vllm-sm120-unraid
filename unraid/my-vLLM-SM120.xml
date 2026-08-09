@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>vLLM</Name>
+  <Repository>ghcr.io/ethanfel/vllm-sm120-unraid:0.1.0</Repository>
+  <Registry>https://github.com/ethanfel/vllm-sm120-unraid/pkgs/container/vllm-sm120-unraid</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://docs.vllm.ai/</Support>
+  <Project>https://github.com/vllm-project/vllm</Project>
+  <ReadMe>SM120-tuned, wake-on-request vLLM OpenAI-compatible server for an RTX PRO 6000 Blackwell. The model fully unloads after the configured idle timeout, releasing VRAM and model-owned RAM.</ReadMe>
+  <Overview>On-demand vLLM 0.26.0 OpenAI-compatible API, configured for RTX PRO 6000 Blackwell (SM120) and Qwen3.6-27B.</Overview>
+  <Category>AI:</Category>
+  <WebUI>http://[IP]:[PORT:8000]/on-demand/status</WebUI>
+  <Icon>https://i.imgur.com/oQcntuY.png</Icon>
+  <ExtraParams>--runtime=nvidia --gpus=all --ipc=host --add-host=host.docker.internal:host-gateway</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>Nvidia Driver plugin. RTX PRO 6000 Blackwell (SM120) recommended. The BF16 model requires the GPU to be mostly free.</Requires>
+  <Config Name="NVIDIA_VISIBLE_DEVICES" Target="NVIDIA_VISIBLE_DEVICES" Default="all" Mode="" Description="GPU UUID or all" Type="Variable" Display="advanced" Required="true" Mask="false">all</Config>
+  <Config Name="NVIDIA_DRIVER_CAPABILITIES" Target="NVIDIA_DRIVER_CAPABILITIES" Default="compute,utility" Mode="" Description="Required NVIDIA driver capabilities" Type="Variable" Display="advanced" Required="true" Mask="false">compute,utility</Config>
+  <Config Name="Model and compiler cache" Target="/models" Default="/mnt/user/appdata/vllm" Mode="rw" Description="Persistent Hugging Face weights and SM120 JIT caches" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/vllm</Config>
+  <Config Name="OpenAI API port" Target="8000" Default="8000" Mode="tcp" Description="OpenAI-compatible API and Swagger UI" Type="Port" Display="always" Required="true" Mask="false">8000</Config>
+  <Config Name="Model ID" Target="MODEL_ID" Default="DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-MTP" Mode="" Description="Hugging Face repository or path under /models" Type="Variable" Display="always" Required="true" Mask="false">DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-MTP</Config>
+  <Config Name="Served model name" Target="SERVED_MODEL_NAME" Default="qwen3.6-27b-fable" Mode="" Description="Short model name used by ComfyUI and OpenAI clients" Type="Variable" Display="always" Required="true" Mask="false">qwen3.6-27b-fable</Config>
+  <Config Name="Maximum context" Target="MAX_MODEL_LEN" Default="131072" Mode="" Description="Reduce this first if startup runs out of VRAM" Type="Variable" Display="always" Required="true" Mask="false">131072</Config>
+  <Config Name="GPU memory utilization" Target="GPU_MEMORY_UTILIZATION" Default="0.90" Mode="" Description="Fraction of total VRAM reserved by vLLM" Type="Variable" Display="always" Required="true" Mask="false">0.90</Config>
+  <Config Name="Maximum concurrent sequences" Target="MAX_NUM_SEQS" Default="4" Mode="" Description="Lower for interactive single-user use or VRAM pressure" Type="Variable" Display="advanced" Required="true" Mask="false">4</Config>
+  <Config Name="Batched token budget" Target="MAX_NUM_BATCHED_TOKENS" Default="8192" Mode="" Description="Prefill batching budget" Type="Variable" Display="advanced" Required="true" Mask="false">8192</Config>
+  <Config Name="On-demand model loading" Target="ENABLE_ON_DEMAND" Default="true" Mode="" Description="Start vLLM on the first API request and fully unload it when idle" Type="Variable" Display="always" Required="true" Mask="false">true</Config>
+  <Config Name="Idle unload timeout" Target="IDLE_TIMEOUT_SECONDS" Default="600" Mode="" Description="Seconds after the final completed request before weights and KV cache are fully unloaded" Type="Variable" Display="always" Required="true" Mask="false">600</Config>
+  <Config Name="Model load timeout" Target="MODEL_LOAD_TIMEOUT_SECONDS" Default="1200" Mode="" Description="Maximum seconds the first API request waits for vLLM to load" Type="Variable" Display="advanced" Required="true" Mask="false">1200</Config>
+  <Config Name="Model stop timeout" Target="MODEL_STOP_TIMEOUT_SECONDS" Default="120" Mode="" Description="Grace period before force-stopping vLLM during idle unload" Type="Variable" Display="advanced" Required="true" Mask="false">120</Config>
+  <Config Name="Minimum free VRAM" Target="MIN_FREE_VRAM_MIB" Default="90000" Mode="" Description="Required free MiB before vLLM starts; prevents OOM while ComfyUI holds a large model" Type="Variable" Display="advanced" Required="true" Mask="false">90000</Config>
+  <Config Name="ComfyUI URL" Target="COMFYUI_BASE_URL" Default="http://host.docker.internal:8188" Mode="" Description="When VRAM is low, release Comfy cached models only if its queue is completely idle; blank disables" Type="Variable" Display="advanced" Required="false" Mask="false">http://host.docker.internal:8188</Config>
+  <Config Name="Comfy release timeout" Target="COMFYUI_FREE_TIMEOUT_SECONDS" Default="120" Mode="" Description="Maximum seconds to wait for idle ComfyUI to release cached VRAM" Type="Variable" Display="advanced" Required="true" Mask="false">120</Config>
+  <Config Name="Private vLLM port" Target="VLLM_INTERNAL_PORT" Default="8001" Mode="" Description="Loopback-only upstream port; do not publish it" Type="Variable" Display="advanced" Required="true" Mask="false">8001</Config>
+  <Config Name="Multimodal limits" Target="LIMIT_MM_PER_PROMPT" Default="{&quot;image&quot;:4,&quot;video&quot;:0}" Mode="" Description="JSON limits for image/video inputs" Type="Variable" Display="advanced" Required="true" Mask="false">{&quot;image&quot;:4,&quot;video&quot;:0}</Config>
+  <Config Name="Default chat-template options" Target="DEFAULT_CHAT_TEMPLATE_KWARGS" Default="{&quot;enable_thinking&quot;:true,&quot;preserve_thinking&quot;:true}" Mode="" Description="Preserve Qwen thinking across multi-turn agent conversations, as recommended in the linked working recipe" Type="Variable" Display="advanced" Required="true" Mask="false">{&quot;enable_thinking&quot;:true,&quot;preserve_thinking&quot;:true}</Config>
+  <Config Name="Prefix caching" Target="ENABLE_PREFIX_CACHING" Default="true" Mode="" Description="Reuse common prompt prefixes" Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
+  <Config Name="Tool calling" Target="ENABLE_TOOLS" Default="true" Mode="" Description="Enable Qwen automatic tool calls" Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
+  <Config Name="Tool-call parser" Target="TOOL_CALL_PARSER" Default="qwen3_coder" Mode="" Description="qwen3_coder matches this model's XML tool format; use hermes only with a Hermes-format chat template" Type="Variable" Display="advanced" Required="true" Mask="false">qwen3_coder</Config>
+  <Config Name="MTP speculative decoding" Target="ENABLE_MTP" Default="false" Mode="" Description="Experimental on SM120; benchmark after the baseline is stable" Type="Variable" Display="advanced" Required="true" Mask="false">false</Config>
+  <Config Name="Text only" Target="LANGUAGE_MODEL_ONLY" Default="false" Mode="" Description="Set true to disable vision and free additional VRAM" Type="Variable" Display="advanced" Required="true" Mask="false">false</Config>
+  <Config Name="KV cache dtype" Target="KV_CACHE_DTYPE" Default="" Mode="" Description="Optional; leave blank for auto" Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Hugging Face token" Target="HF_TOKEN" Default="" Mode="" Description="Optional for this public model; required for gated/private models" Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="API key" Target="API_KEY" Default="" Mode="" Description="Optional bearer token; leave empty for LAN-only unauthenticated access" Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <TailscaleStateDir/>
+</Container>

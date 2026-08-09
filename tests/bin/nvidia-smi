@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+case "$*" in
+  *compute_cap*) printf '12.0\n' ;;
+  *name*) printf 'Test RTX PRO 6000\n' ;;
+  *) exit 1 ;;
+esac
+
