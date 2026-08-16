@@ -1,6 +1,6 @@
 services:
   vllm:
-    image: ghcr.io/ethanfel/vllm-sm120-unraid:0.2.0
+    image: ghcr.io/ethanfel/vllm-sm120-unraid:0.3.0
     container_name: vLLM
     runtime: nvidia
     gpus: all
@@ -19,9 +19,9 @@ services:
     environment:
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
-      MODEL_ID: ${MODEL_ID:-DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-MTP}
-      SERVED_MODEL_NAME: ${SERVED_MODEL_NAME:-qwen3.6-27b-fable}
-      MAX_MODEL_LEN: ${MAX_MODEL_LEN:-131072}
+      MODEL_ID: ${MODEL_ID:-sakamakismile/Qwen3.8-27B-AEON-ULTIMATE-UNCENSORED-NVFP4}
+      SERVED_MODEL_NAME: ${SERVED_MODEL_NAME:-qwen3.8-27b-aeon-nvfp4}
+      MAX_MODEL_LEN: ${MAX_MODEL_LEN:-262144}
       GPU_MEMORY_UTILIZATION: ${GPU_MEMORY_UTILIZATION:-0.90}
       MAX_NUM_SEQS: ${MAX_NUM_SEQS:-4}
       MAX_NUM_BATCHED_TOKENS: ${MAX_NUM_BATCHED_TOKENS:-8192}
@@ -37,9 +37,10 @@ services:
       ENABLE_PREFIX_CACHING: ${ENABLE_PREFIX_CACHING:-true}
       ENABLE_TOOLS: ${ENABLE_TOOLS:-true}
       TOOL_CALL_PARSER: ${TOOL_CALL_PARSER:-qwen3_coder}
-      ENABLE_MTP: ${ENABLE_MTP:-false}
+      ENABLE_MTP: ${ENABLE_MTP:-true}
       LANGUAGE_MODEL_ONLY: ${LANGUAGE_MODEL_ONLY:-false}
       LIMIT_MM_PER_PROMPT: '${LIMIT_MM_PER_PROMPT:-{"image":4,"video":0}}'
-      DEFAULT_CHAT_TEMPLATE_KWARGS: '${DEFAULT_CHAT_TEMPLATE_KWARGS:-{"enable_thinking":true,"preserve_thinking":true}}'
+      DEFAULT_CHAT_TEMPLATE_KWARGS: '${DEFAULT_CHAT_TEMPLATE_KWARGS:-{"enable_thinking":true,"reasoning_effort":"medium","preserve_thinking":true}}'
+      KV_CACHE_DTYPE: ${KV_CACHE_DTYPE:-fp8}
       HF_TOKEN: ${HF_TOKEN:-}
       API_KEY: ${API_KEY:-}

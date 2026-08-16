@@ -1,14 +1,24 @@
 # vLLM on Unraid — RTX PRO 6000 Blackwell (SM120)
 
-This repository publishes a small operational image on top of the official, digest-pinned `vllm/vllm-openai:v0.26.0` release. It serves
-`DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-MTP` through an OpenAI-compatible API and persists model/JIT caches outside the container. A lightweight wake-on-request proxy keeps port 8000 available while the actual vLLM process is fully unloaded when idle.
+This repository publishes a small operational image on top of the official,
+digest-pinned `vllm/vllm-openai:v0.27.1` release. It serves
+`sakamakismile/Qwen3.8-27B-AEON-ULTIMATE-UNCENSORED-NVFP4` through an OpenAI-compatible
+API and persists model/JIT caches outside the container. A lightweight
+wake-on-request proxy keeps port 8000 available while the actual vLLM process
+is fully unloaded when idle.
 
-The model repository is a 55.6 GB BF16 checkpoint with native 262,144-token context and vision support. The default profile uses 131,072 tokens on one 96 GB RTX PRO 6000. It leaves MTP off until the basic SM120 path is verified and benchmarked.
+Its AEON source uses an optimized Abliterix ablation plus SSM `conv1d` outlier
+repair; it is not a behavioral SFT. The public NVFP4 checkpoint uses W4A4
+group-size-16 dense weights while retaining vision, the language head,
+recurrent Gated DeltaNet state, and the native MTP head at higher precision.
+Its indexed weights total 20.56 GB. The default profile uses the native
+262,144-token context on one 96 GB RTX PRO 6000, with FP8 KV cache and
+three-token MTP speculative decoding.
 
 Published image:
 
 ```text
-ghcr.io/ethanfel/vllm-sm120-unraid:0.2.0
+ghcr.io/ethanfel/vllm-sm120-unraid:0.3.0
 ```
 
 ## Install on Unraid
@@ -23,7 +33,7 @@ chmod +x scripts/*.sh tests/*.sh docker/entrypoint.sh
 
 The installer pulls the versioned GHCR image, backs up an existing `my-vLLM.xml`, and installs the new Unraid template. Review and start it from **Docker → Add Container → vLLM**. Unraid does not build the image locally.
 
-The default checkpoint needs the GPU mostly free. A loaded ComfyUI diffusion model can prevent vLLM from reserving enough VRAM even if ComfyUI is idle. Unload its models or stop that container before starting vLLM. ComfyUI can be restarted afterward as an API client, provided it does not load another large GPU model at the same time.
+The default 262K checkpoint profile needs the GPU mostly free. A loaded ComfyUI diffusion model can prevent vLLM from reserving enough VRAM even if ComfyUI is idle. Unload its models or stop that container before starting vLLM. ComfyUI can be restarted afterward as an API client, provided it does not load another large GPU model at the same time.
 
 For Compose instead, copy `.env.example` to `.env`, review it, then run:
 
@@ -47,7 +57,7 @@ Opening the dashboard and its `/docs` alias does not load the model; pressing **
 Use these values in an OpenAI-compatible LLM node:
 
 - Base URL: `http://192.168.1.12:8000/v1`
-- Model: `qwen3.6-27b-fable`
+- Model: `qwen3.8-27b-aeon-nvfp4`
 - API key: `EMPTY` when the template's `API_KEY` is blank; otherwise use the configured value
 - Chat completions route: `/chat/completions`
 
@@ -57,13 +67,16 @@ Test the server from the Unraid host:
 VLLM_BASE_URL=http://127.0.0.1:8000/v1 ./scripts/smoke-test.sh
 ```
 
-Qwen3.6 thinks by default. Clients that support extra OpenAI fields can request non-thinking mode with:
+Qwen3.8 thinks by default. Clients that support extra OpenAI fields can request non-thinking mode with:
 
 ```json
 {"chat_template_kwargs":{"enable_thinking":false}}
 ```
 
-The server defaults to `enable_thinking=true` and `preserve_thinking=true`. This follows the known-working multi-turn vLLM recipe from the model discussion and avoids clients accidentally discarding Qwen's reasoning state. Per-request `chat_template_kwargs` can override it.
+The server defaults to `enable_thinking=true`, `reasoning_effort=medium`, and
+`preserve_thinking=true`. Medium reasoning avoids unnecessarily long thinking
+traces while retaining Qwen's reasoning mode. Per-request
+`chat_template_kwargs` can override these values.
 
 Automatic tools default to `TOOL_CALL_PARSER=qwen3_coder`, matching this checkpoint's XML `<function>`/`<parameter>` tool format. vLLM also supports `hermes`, but only select it for a checkpoint/chat template that emits Hermes JSON tool calls.
 
@@ -108,14 +121,15 @@ The Linux filesystem cache may retain recently read model files after unload. Th
 
 ## Tuning
 
-- If startup runs out of VRAM, set `MAX_MODEL_LEN=65536`, then try `GPU_MEMORY_UTILIZATION=0.92` only if no other GPU workload is present.
+- If startup runs out of VRAM, set `MAX_MODEL_LEN=131072`, then `65536`. Try `GPU_MEMORY_UTILIZATION=0.92` only if no other GPU workload is present.
 - Set `LANGUAGE_MODEL_ONLY=true` if ComfyUI only sends text. This removes the vision encoder and leaves more cache headroom.
-- After the baseline is stable, set `ENABLE_MTP=true` and compare throughput. Keep it disabled if startup, long prompts, or CUDA graph capture are unstable on SM120.
+- MTP is enabled by default with `{"method":"mtp","num_speculative_tokens":3}`. Set `ENABLE_MTP=false` to compare baseline throughput or diagnose speculative-decoding issues.
+- FP8 KV cache is enabled by default to preserve context capacity. Set `KV_CACHE_DTYPE=bfloat16` only for diagnosis; it approximately doubles KV-cache memory.
 - Keep port 8000 on the trusted LAN. If the endpoint is reachable by untrusted clients, set a strong `API_KEY` and add firewall or reverse-proxy controls.
 
 ## Publishing
 
-Tagged releases are validated and published by GitHub Actions to GHCR. The `v0.2.0` tag produces immutable `0.2.0`, moving `0.2`, and commit-SHA image tags. The workflow uses GitHub's package token; no registry credential is stored in this repository.
+Tagged releases are validated and published by GitHub Actions to GHCR. The `v0.3.0` tag produces immutable `0.3.0`, moving `0.3`, and commit-SHA image tags. The workflow uses GitHub's package token; no registry credential is stored in this repository.
 
 For a local development build:
 

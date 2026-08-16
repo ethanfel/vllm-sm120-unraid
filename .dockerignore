@@ -1,7 +1,4 @@
-.git
-.gitrepo
-.env
-README.md
-tests
-unraid
-scripts
+*
+!Dockerfile
+!docker
+!docker/**

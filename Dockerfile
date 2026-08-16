@@ -1,10 +1,10 @@
-ARG VLLM_BASE_IMAGE=vllm/vllm-openai:v0.26.0@sha256:ffb2d59b1c059a5bd8d781320c9f5189de8293693b7d95da54befddaa54abf52
+ARG VLLM_BASE_IMAGE=vllm/vllm-openai:v0.27.1@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967
 FROM ${VLLM_BASE_IMAGE}
 
 USER root
 
 # These values matter for CUDA/Triton extensions compiled lazily on GeForce and
-# RTX PRO Blackwell (compute capability 12.0). The official v0.26.0 image
+# RTX PRO Blackwell (compute capability 12.0). The official v0.27.1 image
 # already contains the released SM12x support; this keeps any JIT work on the
 # same architecture instead of compiling a broad set of kernels.
 ENV TORCH_CUDA_ARCH_LIST=12.0 \

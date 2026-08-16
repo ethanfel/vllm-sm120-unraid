@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 base_url="${VLLM_BASE_URL:-http://127.0.0.1:8000/v1}"
-model="${SERVED_MODEL_NAME:-qwen3.6-27b-fable}"
+model="${SERVED_MODEL_NAME:-qwen3.8-27b-aeon-nvfp4}"
 api_key="${API_KEY:-EMPTY}"
 
 curl --fail --silent --show-error \
@@ -16,4 +16,3 @@ curl --fail --silent --show-error \
   "${base_url}/chat/completions" \
   --data "$(printf '{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: vLLM SM120 ready\"}],\"max_tokens\":32,\"temperature\":0,\"chat_template_kwargs\":{\"enable_thinking\":false}}' "${model}")"
 echo
-

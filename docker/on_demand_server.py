@@ -498,7 +498,7 @@ def create_app(controller: ModelController) -> FastAPI:
         if not dashboard_path.is_file():
             dashboard_path = Path(__file__).with_name("dashboard.html")
         template = dashboard_path.read_text(encoding="utf-8")
-        model_name = os.getenv("SERVED_MODEL_NAME", "qwen3.6-27b-fable")
+        model_name = os.getenv("SERVED_MODEL_NAME", "qwen3.8-27b-aeon-nvfp4")
         page = template.replace("__DEFAULT_MODEL_JSON__", json.dumps(model_name))
         return HTMLResponse(page, headers={"Cache-Control": "no-store"})
 

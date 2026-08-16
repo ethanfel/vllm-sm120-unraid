@@ -14,18 +14,20 @@ if [[ $# -gt 0 && "${1}" != --* ]]; then
   exec "$@"
 fi
 
-MODEL_ID="${MODEL_ID:-DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-MTP}"
-SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-qwen3.6-27b-fable}"
+MODEL_ID="${MODEL_ID:-sakamakismile/Qwen3.8-27B-AEON-ULTIMATE-UNCENSORED-NVFP4}"
+SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-qwen3.8-27b-aeon-nvfp4}"
 HOST="${VLLM_HOST:-0.0.0.0}"
 PORT="${VLLM_PORT:-8000}"
 ENABLE_ON_DEMAND="${ENABLE_ON_DEMAND:-true}"
 VLLM_INTERNAL_PORT="${VLLM_INTERNAL_PORT:-8001}"
-MAX_MODEL_LEN="${MAX_MODEL_LEN:-131072}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-262144}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-4}"
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-8192}"
 LIMIT_MM_PER_PROMPT="${LIMIT_MM_PER_PROMPT:-}"
 DEFAULT_CHAT_TEMPLATE_KWARGS="${DEFAULT_CHAT_TEMPLATE_KWARGS:-}"
+ENABLE_MTP="${ENABLE_MTP:-true}"
+KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-fp8}"
 
 if bool_enabled "${ENABLE_ON_DEMAND}"; then
   if [[ "${VLLM_INTERNAL_PORT}" == "${PORT}" ]]; then
@@ -45,7 +47,7 @@ if [[ -z "${LIMIT_MM_PER_PROMPT}" ]]; then
   LIMIT_MM_PER_PROMPT='{"image":4,"video":0}'
 fi
 if [[ -z "${DEFAULT_CHAT_TEMPLATE_KWARGS}" ]]; then
-  DEFAULT_CHAT_TEMPLATE_KWARGS='{"enable_thinking":true,"preserve_thinking":true}'
+  DEFAULT_CHAT_TEMPLATE_KWARGS='{"enable_thinking":true,"reasoning_effort":"medium","preserve_thinking":true}'
 fi
 
 # Accept either common Hugging Face token spelling without printing the secret.
@@ -96,17 +98,17 @@ else
   args+=(--limit-mm-per-prompt "${LIMIT_MM_PER_PROMPT}")
 fi
 
-# MTP is opt-in on SM120. Establish a stable baseline first, then benchmark it;
-# MTP performance and CUDA-graph support have changed quickly between releases.
-if bool_enabled "${ENABLE_MTP:-false}"; then
+# This checkpoint's restored native MTP head is enabled by default. Set
+# ENABLE_MTP=false to disable speculative decoding for comparison or diagnosis.
+if bool_enabled "${ENABLE_MTP}"; then
   speculative_config="${SPECULATIVE_CONFIG:-}"
   if [[ -z "${speculative_config}" ]]; then
-    speculative_config='{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+    speculative_config='{"method":"mtp","num_speculative_tokens":3}'
   fi
   args+=(--speculative-config "${speculative_config}")
 fi
 
-if [[ -n "${KV_CACHE_DTYPE:-}" ]]; then
+if [[ -n "${KV_CACHE_DTYPE}" ]]; then
   args+=(--kv-cache-dtype "${KV_CACHE_DTYPE}")
 fi
 
@@ -119,7 +121,7 @@ if [[ -n "${MODEL_REVISION:-}" ]]; then
 fi
 
 echo "Configured vLLM model '${SERVED_MODEL_NAME}' from '${MODEL_ID}'"
-echo "Profile: max_model_len=${MAX_MODEL_LEN}, gpu_memory_utilization=${GPU_MEMORY_UTILIZATION}, max_num_seqs=${MAX_NUM_SEQS}, mtp=${ENABLE_MTP:-false}"
+echo "Profile: max_model_len=${MAX_MODEL_LEN}, gpu_memory_utilization=${GPU_MEMORY_UTILIZATION}, max_num_seqs=${MAX_NUM_SEQS}, mtp=${ENABLE_MTP}, kv_cache_dtype=${KV_CACHE_DTYPE}"
 
 # Additional vLLM flags may be supplied as Docker command/Post Arguments. Each
 # must be a distinct argument so quoted JSON remains intact.
