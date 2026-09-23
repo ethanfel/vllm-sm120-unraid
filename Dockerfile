@@ -6,11 +6,10 @@ USER root
 # vLLM 0.30.0 does not reload the separate MTP draft after level-2 sleep.
 # Apply the pinned upstream fix until vLLM includes it in a release.
 # https://github.com/vllm-project/vllm/pull/52487
+COPY docker/mtp-level2-v030.diff /tmp/vllm-mtp-level2.diff
 RUN set -eux; \
-    curl -fsSL --retry 3 https://github.com/vllm-project/vllm/pull/52487.diff -o /tmp/vllm-mtp-level2.diff; \
-    echo '4c99d09a248f645626bd12b14760d9f969496d9e5d84dcbdc75dfd661b44de59  /tmp/vllm-mtp-level2.diff' | sha256sum -c -; \
-    awk '/^diff --git / { if (copy) exit; if ($0 == "diff --git a/vllm/v1/worker/gpu_model_runner.py b/vllm/v1/worker/gpu_model_runner.py") copy=1 } copy' /tmp/vllm-mtp-level2.diff \
-      | patch --batch --forward -p1 -d /usr/local/lib/python3.12/dist-packages; \
+    echo '2d343de142b550c2abea4554decae3e6e667ea7e5aa2dd0aa688e0fd687a732d  /tmp/vllm-mtp-level2.diff' | sha256sum -c -; \
+    patch --batch --forward -p1 -d /usr/local/lib/python3.12/dist-packages < /tmp/vllm-mtp-level2.diff; \
     python3 -m py_compile /usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu_model_runner.py; \
     rm /tmp/vllm-mtp-level2.diff
 
