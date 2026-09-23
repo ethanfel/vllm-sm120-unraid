@@ -1,7 +1,8 @@
 # vLLM on Unraid — RTX PRO 6000 Blackwell (SM120)
 
-This repository publishes a small operational image on top of the official,
-digest-pinned `vllm/vllm-openai:v0.30.0` release. The current Unraid profile serves
+This repository packages vLLM for SM120. The current Unraid image uses the
+official vLLM 0.27.1 base; the experimental image uses digest-pinned 0.30.0.
+The current Unraid profile serves
 `sakamakismile/Qwen3.8-27B-AEON-ULTIMATE-UNCENSORED-NVFP4` through an OpenAI-compatible
 API and persists model/JIT caches outside the container. A lightweight
 wake-on-request proxy keeps port 8000 available while level-2 sleep discards
@@ -22,13 +23,58 @@ Published image:
 ghcr.io/ethanfel/vllm-sm120-unraid:0.4.0
 ```
 
-The `0.5.0-rc2` candidate updates the vLLM base to 0.30.0 and applies a
+The `0.5.0-rc3` candidate updates the vLLM base to 0.30.0 and applies a
 SHA-256-pinned version of [upstream PR #52487](https://github.com/vllm-project/vllm/pull/52487).
 The patch reloads MTP draft weights after level-2 sleep; without it, responses
 remain correct but speculative-token acceptance falls to zero after wake. This
-candidate is being tested with the BF16 TWIN-TURBO checkpoint in a separate
-container. The Unraid template remains on the validated 0.4.0 image until that
-test is complete.
+patch is vendored as `docker/mtp-level2-v030.diff` so builds do not depend on
+the PR URL. The Unraid template remains on 0.4.0; update it manually if you
+want to trial the candidate. The unpatched 0.4.0 level-2/MTP combination may
+also lose speculative acceleration after wake. `IDLE_OFFLOAD_MODE=stop` avoids
+that issue until you change images, but cold starts take longer.
+
+### Experimental TWIN-TURBO BF16 profile
+
+The following settings were tested on one RTX PRO 6000 Blackwell. They keep
+the same port 8000 and OpenAI-compatible API. Change the image and variables
+in the Unraid container editor; add `MODEL_REVISION` and `SPECULATIVE_CONFIG`
+as variables if they are not already present.
+
+| Setting | Value |
+| --- | --- |
+| Image | `ghcr.io/ethanfel/vllm-sm120-unraid:0.5.0-rc3` |
+| `MODEL_ID` | `DavidAU/Qwen3.8-27B-TWIN-TURBO-Fable-Cold-Fusion-709-ULTRA-HERETIC-Uncensored` |
+| `MODEL_REVISION` | `61a55dc6615945ba4cdc32e212dfe966fc42b1c8` |
+| `SERVED_MODEL_NAME` | `qwen3.8-27b-twin-turbo-ultra` |
+| `MAX_MODEL_LEN` | `262144` |
+| `GPU_MEMORY_UTILIZATION` | `0.85` |
+| `MAX_NUM_SEQS` | `2` |
+| `MIN_FREE_VRAM_MIB` | `85000` |
+| `IDLE_OFFLOAD_MODE` | `level2` |
+| `ENABLE_MTP` | `true` |
+| `SPECULATIVE_CONFIG` | `{"method":"mtp","num_speculative_tokens":1}` |
+| `DEFAULT_CHAT_TEMPLATE_KWARGS` | `{"enable_thinking":false}` |
+| `KV_CACHE_DTYPE` | `fp8` |
+
+The GPU trial used `COMFYUI_BASE_URL` empty, so it never asked ComfyUI to
+release cached models. Keep the existing URL only if you want that automatic
+release behavior while ComfyUI's queue is idle.
+
+Use `qwen3.8-27b-twin-turbo-ultra` in ComfyUI or another OpenAI-compatible
+client. Thinking can still be enabled per request with
+`{"chat_template_kwargs":{"enable_thinking":true,"reasoning_effort":"medium"}}`.
+With a 700-token output cap, both AEON and TWIN-TURBO spent the entire budget
+thinking on a prompt-writing test, so the non-thinking default is more useful
+for short creative prompts.
+
+At the tested settings, vLLM reported a 25.6 GiB FP8 KV cache and 2.85x
+maximum concurrency at 262K context. Level-2 sleep reduced total server VRAM
+use from 88,115 MiB to 8,531 MiB, including other resident processes. Two
+wake cycles took about seven seconds each; the patched MTP drafter accepted
+78/107 tokens after each wake, matching its pre-sleep acceptance. The
+unpatched image accepted 0/190 after wake. The BF16 model loaded from the
+local XFS cache in about 27 seconds; a full cold start also includes engine
+initialization and compilation.
 
 ## Install on Unraid
 
