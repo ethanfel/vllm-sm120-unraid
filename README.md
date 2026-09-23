@@ -22,9 +22,13 @@ Published image:
 ghcr.io/ethanfel/vllm-sm120-unraid:0.4.0
 ```
 
-The `0.5.0-rc1` candidate updates the vLLM base to 0.30.0. It is used for an
-isolated test of the BF16 TWIN-TURBO checkpoint; the Unraid template remains on
-the validated 0.4.0 image until that test is complete.
+The `0.5.0-rc2` candidate updates the vLLM base to 0.30.0 and applies a
+SHA-256-pinned version of [upstream PR #52487](https://github.com/vllm-project/vllm/pull/52487).
+The patch reloads MTP draft weights after level-2 sleep; without it, responses
+remain correct but speculative-token acceptance falls to zero after wake. This
+candidate is being tested with the BF16 TWIN-TURBO checkpoint in a separate
+container. The Unraid template remains on the validated 0.4.0 image until that
+test is complete.
 
 ## Install on Unraid
 
