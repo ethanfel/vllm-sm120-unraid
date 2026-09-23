@@ -48,7 +48,8 @@
     }
     .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 4px rgb(148 163 184 / 10%); }
     .state-ready .dot { background: var(--accent); box-shadow: 0 0 0 4px rgb(110 231 183 / 12%); }
-    .state-loading .dot, .state-stopping .dot { background: var(--warn); animation: pulse 1.2s infinite; }
+    .state-offloaded .dot { background: var(--accent-2); box-shadow: 0 0 0 4px rgb(96 165 250 / 12%); }
+    .state-loading .dot, .state-sleeping .dot, .state-waking .dot, .state-stopping .dot { background: var(--warn); animation: pulse 1.2s infinite; }
     .state-error .dot { background: var(--error); }
     @keyframes pulse { 50% { opacity: .35; } }
 
@@ -138,7 +139,7 @@
     <header class="topbar">
       <div>
         <h1>vLLM On-Demand</h1>
-        <p class="subtitle">OpenAI-compatible API · RTX PRO 6000 Blackwell · model stays unloaded until requested</p>
+        <p class="subtitle">OpenAI-compatible API · RTX PRO 6000 Blackwell · weights and KV cache auto-offload when idle</p>
       </div>
       <div id="stateBadge" class="badge state-unloaded"><span class="dot"></span><span id="stateLabel">Connecting…</span></div>
     </header>
@@ -148,7 +149,7 @@
         <div class="metric"><span>Model state</span><strong id="metricState">—</strong></div>
         <div class="metric"><span>Process ID</span><strong id="metricPid">—</strong></div>
         <div class="metric"><span>In flight</span><strong id="metricInflight">—</strong></div>
-        <div class="metric"><span>Idle / unload</span><strong id="metricIdle">—</strong></div>
+        <div class="metric"><span>Idle / offload</span><strong id="metricIdle">—</strong></div>
         <div class="metric"><span>VRAM guard</span><strong id="metricVram">—</strong></div>
         <div class="metric"><span>Comfy handoff</span><strong id="metricComfy">—</strong></div>
       </div>
@@ -164,7 +165,8 @@
       </label>
       <div class="actions">
         <button id="loadButton" class="primary" onclick="loadModel(this)">Load model</button>
-        <button id="unloadButton" class="danger" onclick="unloadModel(this)">Unload</button>
+        <button id="unloadButton" onclick="unloadModel(this)">Offload</button>
+        <button id="stopButton" class="danger" onclick="stopModel(this)">Hard stop</button>
         <a class="button-link" href="/vllm/docs" title="Loads the model before opening upstream Swagger">vLLM Swagger</a>
       </div>
     </section>
@@ -325,7 +327,9 @@
         document.getElementById('metricPid').textContent = status.pid ?? 'none';
         document.getElementById('metricInflight').textContent = status.inflight_requests ?? 0;
         const remaining = Math.max(0, Number(status.idle_timeout_seconds || 0) - Number(status.idle_seconds || 0));
-        document.getElementById('metricIdle').textContent = state === 'ready' ? `${Math.ceil(remaining)}s left` : `${status.idle_timeout_seconds}s`;
+        document.getElementById('metricIdle').textContent = state === 'ready'
+          ? `${Math.ceil(remaining)}s left`
+          : (state === 'offloaded' ? status.idle_offload_mode : `${status.idle_timeout_seconds}s`);
         document.getElementById('metricVram').textContent = status.minimum_free_vram_mib ? `${status.minimum_free_vram_mib} MiB` : 'disabled';
         document.getElementById('metricComfy').textContent = status.comfyui_auto_release ? 'idle release on' : 'disabled';
         const error = document.getElementById('statusError');
@@ -342,7 +346,11 @@
     }
 
     async function unloadModel(button) {
-      await runRequest('Unload model', '/on-demand/unload', { method: 'POST', headers: authHeaders() }, button);
+      await runRequest('Offload model', '/on-demand/unload', { method: 'POST', headers: authHeaders() }, button);
+    }
+
+    async function stopModel(button) {
+      await runRequest('Hard stop model process', '/on-demand/stop', { method: 'POST', headers: authHeaders() }, button);
     }
 
     async function refreshModels(button = null) {

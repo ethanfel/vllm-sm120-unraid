@@ -1,11 +1,12 @@
 # vLLM on Unraid — RTX PRO 6000 Blackwell (SM120)
 
 This repository publishes a small operational image on top of the official,
-digest-pinned `vllm/vllm-openai:v0.27.1` release. It serves
+digest-pinned `vllm/vllm-openai:v0.30.0` release. The current Unraid profile serves
 `sakamakismile/Qwen3.8-27B-AEON-ULTIMATE-UNCENSORED-NVFP4` through an OpenAI-compatible
 API and persists model/JIT caches outside the container. A lightweight
-wake-on-request proxy keeps port 8000 available while the actual vLLM process
-is fully unloaded when idle.
+wake-on-request proxy keeps port 8000 available while level-2 sleep discards
+the model weights and KV cache when idle. The initialized private vLLM process
+stays alive so later requests avoid a complete engine restart.
 
 Its AEON source uses an optimized Abliterix ablation plus SSM `conv1d` outlier
 repair; it is not a behavioral SFT. The public NVFP4 checkpoint uses W4A4
@@ -18,8 +19,12 @@ three-token MTP speculative decoding.
 Published image:
 
 ```text
-ghcr.io/ethanfel/vllm-sm120-unraid:0.3.0
+ghcr.io/ethanfel/vllm-sm120-unraid:0.4.0
 ```
+
+The `0.5.0-rc1` candidate updates the vLLM base to 0.30.0. It is used for an
+isolated test of the BF16 TWIN-TURBO checkpoint; the Unraid template remains on
+the validated 0.4.0 image until that test is complete.
 
 ## Install on Unraid
 
@@ -42,7 +47,7 @@ docker compose pull
 docker compose up -d
 ```
 
-The container itself starts with the model unloaded. The first `/v1` request downloads the model if it is not cached, loads vLLM, waits for readiness, and then forwards that same request. Follow progress with:
+The container itself starts with the model unloaded. The first `/v1` request downloads the model if it is not cached, loads vLLM, waits for readiness, and then forwards that same request. After the idle timeout, subsequent requests wake the level-2-offloaded engine and reload its weights from disk. Follow progress with:
 
 ```bash
 docker logs -f vLLM
@@ -50,7 +55,7 @@ docker logs -f vLLM
 
 Open the container's **WebUI** from Unraid for the interactive dashboard. It shows live lifecycle status and includes one-click tests for model discovery, chat completion, automatic tool calling, and local image input. Its **Cached models** section lists Hugging Face checkpoints and their disk usage without loading vLLM. Unused checkpoints can be removed after typing the full repository name; the currently configured model is protected from deletion. Deleted weights can be recovered only by downloading them again. Set `MODEL_CACHE_DELETE_ENABLED=false` to make the cache manager read-only.
 
-Opening the dashboard and its `/docs` alias does not load the model; pressing **Load model**, opening **vLLM Swagger**, or running an API test does.
+Opening the dashboard and its `/docs` alias does not load the model; pressing **Load model**, opening **vLLM Swagger**, or running an API test does. **Offload** invokes the configured idle action; **Hard stop** terminates the private vLLM process completely.
 
 ## ComfyUI / OpenAI-compatible clients
 
@@ -82,9 +87,11 @@ Automatic tools default to `TOOL_CALL_PARSER=qwen3_coder`, matching this checkpo
 
 Recommended starting sampling values are `temperature=1.0`, `top_p=0.95`, and `top_k=20` for general thinking, or `temperature=0.7`, `top_p=0.8`, `top_k=20`, and `presence_penalty=1.5` for non-thinking use.
 
-## On-demand loading
+## On-demand loading and auto-offload
 
-On-demand mode is enabled by default. After the final API response finishes, an idle timer starts. At 600 seconds the vLLM child process is terminated, releasing its model weights, KV cache, CUDA allocations, and model-owned CPU memory. The controller itself stays healthy and consumes very little memory.
+On-demand mode is enabled by default. After the final API response finishes, an idle timer starts. At 600 seconds the default `IDLE_OFFLOAD_MODE=level2` discards model weights, KV cache, and their GPU allocations while retaining the initialized private vLLM process. Unlike level-1 sleep, level 2 does not retain a CPU copy of the weights. A small process and CUDA-context footprint remains. Set `IDLE_OFFLOAD_MODE=stop` to restore the legacy behavior that terminates the private process completely.
+
+The initial load still performs full vLLM initialization. A level-2 wake reallocates weight memory, reloads weights with the normal Safetensors loader, and restores the KV cache without repeating the full process startup. If sleep or wake fails, the controller safely falls back to a complete process stop and cold restart.
 
 The OpenAI URL does not change:
 
@@ -98,9 +105,12 @@ Inspect or control the model lifecycle from the trusted LAN:
 curl http://192.168.1.12:8000/on-demand/status
 curl -X POST http://192.168.1.12:8000/on-demand/load
 curl -X POST http://192.168.1.12:8000/on-demand/unload
+curl -X POST http://192.168.1.12:8000/on-demand/stop
 ```
 
-If `API_KEY` is configured, the load and unload endpoints require the same bearer token. The dashboard, `/docs`, status, and health do not start the model. Opening `/vllm/docs`, querying `/v1/models`, or making any other `/v1` request does start it. Set `IDLE_TIMEOUT_SECONDS` to change the default ten-minute delay, or set `ENABLE_ON_DEMAND=false` for the original always-loaded behavior.
+`/on-demand/unload` performs the configured idle action, which is level-2 offload by default. `/on-demand/stop` always terminates the private process. If `API_KEY` is configured, all lifecycle endpoints require the same bearer token. The dashboard, `/docs`, status, and health do not start the model. Opening `/vllm/docs`, querying `/v1/models`, or making any other `/v1` request starts or wakes it. Set `IDLE_TIMEOUT_SECONDS` to change the default ten-minute delay, or set `ENABLE_ON_DEMAND=false` for always-loaded behavior.
+
+Level-2 serving uses vLLM's development lifecycle API only on the loopback-bound private port. The public controller exposes OpenAI routes, its own authenticated lifecycle routes, and the upstream documentation alias; it does not proxy vLLM's sleep or collective-RPC endpoints.
 
 The cached-model manager also stays outside `/v1`, so listing storage never wakes the model:
 
@@ -117,7 +127,7 @@ Before launching vLLM, the controller requires 90,000 MiB of free VRAM by defaul
 
 An OpenAI node placed after a large diffusion/video stage in the same active Comfy workflow still needs an explicit **Unload Models** node immediately before the API node. Comfy cannot process its asynchronous `/free` flag while that same workflow is blocked waiting for the LLM response. The threshold is configurable with `MIN_FREE_VRAM_MIB`; setting it to `0` disables the guard. Leave `COMFYUI_BASE_URL` blank to disable automatic idle-cache release.
 
-The Linux filesystem cache may retain recently read model files after unload. This cache is reclaimable and is automatically surrendered when applications need RAM; it is not pinned model memory.
+The Linux filesystem cache may retain recently read model files after offload. This cache is reclaimable and is automatically surrendered when applications need RAM; it is not pinned model memory.
 
 ## Tuning
 
@@ -129,7 +139,7 @@ The Linux filesystem cache may retain recently read model files after unload. Th
 
 ## Publishing
 
-Tagged releases are validated and published by GitHub Actions to GHCR. The `v0.3.0` tag produces immutable `0.3.0`, moving `0.3`, and commit-SHA image tags. The workflow uses GitHub's package token; no registry credential is stored in this repository.
+Tagged releases are validated and published by GitHub Actions to GHCR. The `v0.4.0` tag produces immutable `0.4.0`, moving `0.4`, and commit-SHA image tags. The workflow uses GitHub's package token; no registry credential is stored in this repository.
 
 For a local development build:
 

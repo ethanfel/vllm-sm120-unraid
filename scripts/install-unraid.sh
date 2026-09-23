@@ -7,7 +7,7 @@ if [[ "${EUID}" -ne 0 ]]; then
 fi
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-image="${VLLM_IMAGE:-ghcr.io/ethanfel/vllm-sm120-unraid:0.3.0}"
+image="${VLLM_IMAGE:-ghcr.io/ethanfel/vllm-sm120-unraid:0.4.0}"
 template_dir="/boot/config/plugins/dockerMan/templates-user"
 template_target="${template_dir}/my-vLLM.xml"
 

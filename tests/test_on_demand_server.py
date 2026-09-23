@@ -155,7 +155,7 @@ class OnDemandServerTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await controller.close()
 
-    async def test_request_loads_then_idle_unloads_model(self) -> None:
+    async def test_stop_mode_loads_then_idle_stops_model(self) -> None:
         upstream_port = unused_port()
         controller = MODULE.ModelController(
             command=[
@@ -167,6 +167,7 @@ class OnDemandServerTests(unittest.IsolatedAsyncioTestCase):
             idle_timeout=0.3,
             load_timeout=5.0,
             stop_timeout=2.0,
+            idle_offload_mode="stop",
         )
         app = MODULE.create_app(controller)
         await controller.start()
@@ -207,6 +208,69 @@ class OnDemandServerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(status["state"], "unloaded")
                 self.assertFalse(status["model_loaded"])
                 self.assertIsNone(status["pid"])
+        finally:
+            await controller.close()
+
+    async def test_level2_mode_offloads_and_wakes_same_process(self) -> None:
+        upstream_port = unused_port()
+        controller = MODULE.ModelController(
+            command=[
+                sys.executable,
+                str(REPO_DIR / "tests" / "fake_vllm.py"),
+                str(upstream_port),
+            ],
+            upstream_port=upstream_port,
+            idle_timeout=0.3,
+            load_timeout=5.0,
+            stop_timeout=2.0,
+            idle_offload_mode="level2",
+        )
+        app = MODULE.create_app(controller)
+        await controller.start()
+        try:
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://controller"
+            ) as client:
+                private_sleep = await client.post("/sleep?level=2")
+                self.assertEqual(private_sleep.status_code, 404)
+                self.assertIsNone(controller.process)
+
+                first = await client.get("/v1/models")
+                self.assertEqual(first.status_code, 200)
+                first_status = await controller.snapshot()
+                first_pid = first_status["pid"]
+                self.assertEqual(first_status["state"], "ready")
+                self.assertTrue(first_status["process_running"])
+
+                for _ in range(30):
+                    if (await controller.snapshot())["state"] == "offloaded":
+                        break
+                    await asyncio.sleep(0.1)
+
+                offloaded = await controller.snapshot()
+                self.assertEqual(offloaded["state"], "offloaded")
+                self.assertFalse(offloaded["model_loaded"])
+                self.assertTrue(offloaded["process_running"])
+                self.assertEqual(offloaded["pid"], first_pid)
+                self.assertEqual(offloaded["idle_offload_mode"], "level2")
+
+                second = await client.get("/v1/models")
+                self.assertEqual(second.status_code, 200)
+                awake = await controller.snapshot()
+                self.assertEqual(awake["state"], "ready")
+                self.assertEqual(awake["pid"], first_pid)
+
+                offload = await client.post("/on-demand/unload")
+                self.assertEqual(offload.status_code, 200)
+                self.assertEqual(offload.json()["state"], "offloaded")
+                self.assertEqual(offload.json()["pid"], first_pid)
+
+                stopped = await client.post("/on-demand/stop")
+                self.assertEqual(stopped.status_code, 200)
+                self.assertEqual(stopped.json()["state"], "unloaded")
+                self.assertFalse(stopped.json()["process_running"])
+                self.assertIsNone(stopped.json()["pid"])
         finally:
             await controller.close()
 

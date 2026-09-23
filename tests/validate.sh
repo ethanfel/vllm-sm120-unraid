@@ -80,13 +80,14 @@ import xml.etree.ElementTree as ET
 path = sys.argv[1]
 root = ET.parse(path).getroot()
 assert root.tag == "Container"
-assert root.findtext("Repository") == "ghcr.io/ethanfel/vllm-sm120-unraid:0.3.0"
+assert root.findtext("Repository") == "ghcr.io/ethanfel/vllm-sm120-unraid:0.4.0"
 assert root.findtext("WebUI") == "http://[IP]:[PORT:8000]/"
 configs = {node.attrib.get("Target"): node for node in root.findall("Config")}
 targets = set(configs)
 required = {
     "/models", "8000", "MODEL_ID", "SERVED_MODEL_NAME", "MAX_MODEL_LEN",
     "ENABLE_ON_DEMAND", "IDLE_TIMEOUT_SECONDS", "VLLM_INTERNAL_PORT",
+    "IDLE_OFFLOAD_MODE",
     "MIN_FREE_VRAM_MIB",
     "COMFYUI_BASE_URL",
     "MODEL_CACHE_DELETE_ENABLED",
@@ -99,12 +100,13 @@ assert configs["SERVED_MODEL_NAME"].attrib["Default"] == "qwen3.8-27b-aeon-nvfp4
 assert configs["MAX_MODEL_LEN"].attrib["Default"] == "262144"
 assert configs["ENABLE_MTP"].attrib["Default"] == "true"
 assert configs["KV_CACHE_DTYPE"].attrib["Default"] == "fp8"
+assert configs["IDLE_OFFLOAD_MODE"].attrib["Default"] == "level2"
 print("Unraid XML and shell syntax are valid")
 PY
 else
   template="${repo_dir}/unraid/my-vLLM-SM120.xml"
   grep -Fq '<Container version="2">' "${template}"
-  grep -Fq '<Repository>ghcr.io/ethanfel/vllm-sm120-unraid:0.3.0</Repository>' "${template}"
+  grep -Fq '<Repository>ghcr.io/ethanfel/vllm-sm120-unraid:0.4.0</Repository>' "${template}"
   grep -Fq '<WebUI>http://[IP]:[PORT:8000]/</WebUI>' "${template}"
   grep -Fq 'Target="MODEL_ID"' "${template}"
   grep -Fq 'Target="SERVED_MODEL_NAME"' "${template}"

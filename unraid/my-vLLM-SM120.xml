@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>vLLM</Name>
-  <Repository>ghcr.io/ethanfel/vllm-sm120-unraid:0.3.0</Repository>
+  <Repository>ghcr.io/ethanfel/vllm-sm120-unraid:0.4.0</Repository>
   <Registry>https://github.com/ethanfel/vllm-sm120-unraid/pkgs/container/vllm-sm120-unraid</Registry>
   <Network>bridge</Network>
   <MyIP/>
@@ -9,7 +9,7 @@
   <Privileged>false</Privileged>
   <Support>https://docs.vllm.ai/</Support>
   <Project>https://github.com/vllm-project/vllm</Project>
-  <ReadMe>SM120-tuned, wake-on-request vLLM OpenAI-compatible server for an RTX PRO 6000 Blackwell. The model fully unloads after the configured idle timeout, releasing VRAM and model-owned RAM.</ReadMe>
+  <ReadMe>SM120-tuned, wake-on-request vLLM OpenAI-compatible server for an RTX PRO 6000 Blackwell. Level-2 auto-offload discards model weights and KV cache while retaining the initialized engine for faster wake-up.</ReadMe>
   <Overview>On-demand vLLM 0.27.1 OpenAI-compatible API, configured for RTX PRO 6000 Blackwell (SM120) and Qwen3.8-27B AEON NVFP4.</Overview>
   <Category>AI:</Category>
   <WebUI>http://[IP]:[PORT:8000]/</WebUI>
@@ -30,10 +30,11 @@
   <Config Name="GPU memory utilization" Target="GPU_MEMORY_UTILIZATION" Default="0.90" Mode="" Description="Fraction of total VRAM reserved by vLLM" Type="Variable" Display="always" Required="true" Mask="false">0.90</Config>
   <Config Name="Maximum concurrent sequences" Target="MAX_NUM_SEQS" Default="4" Mode="" Description="Lower for interactive single-user use or VRAM pressure" Type="Variable" Display="advanced" Required="true" Mask="false">4</Config>
   <Config Name="Batched token budget" Target="MAX_NUM_BATCHED_TOKENS" Default="8192" Mode="" Description="Prefill batching budget" Type="Variable" Display="advanced" Required="true" Mask="false">8192</Config>
-  <Config Name="On-demand model loading" Target="ENABLE_ON_DEMAND" Default="true" Mode="" Description="Start vLLM on the first API request and fully unload it when idle" Type="Variable" Display="always" Required="true" Mask="false">true</Config>
-  <Config Name="Idle unload timeout" Target="IDLE_TIMEOUT_SECONDS" Default="600" Mode="" Description="Seconds after the final completed request before weights and KV cache are fully unloaded" Type="Variable" Display="always" Required="true" Mask="false">600</Config>
+  <Config Name="On-demand model loading" Target="ENABLE_ON_DEMAND" Default="true" Mode="" Description="Start or wake vLLM on the first API request and offload it when idle" Type="Variable" Display="always" Required="true" Mask="false">true</Config>
+  <Config Name="Idle offload timeout" Target="IDLE_TIMEOUT_SECONDS" Default="600" Mode="" Description="Seconds after the final completed request before weights and KV cache are offloaded" Type="Variable" Display="always" Required="true" Mask="false">600</Config>
+  <Config Name="Idle offload mode" Target="IDLE_OFFLOAD_MODE" Default="level2" Mode="" Description="level2 discards weights and KV cache but retains the initialized engine; stop terminates the process" Type="Variable" Display="always" Required="true" Mask="false">level2</Config>
   <Config Name="Model load timeout" Target="MODEL_LOAD_TIMEOUT_SECONDS" Default="1200" Mode="" Description="Maximum seconds the first API request waits for vLLM to load" Type="Variable" Display="advanced" Required="true" Mask="false">1200</Config>
-  <Config Name="Model stop timeout" Target="MODEL_STOP_TIMEOUT_SECONDS" Default="120" Mode="" Description="Grace period before force-stopping vLLM during idle unload" Type="Variable" Display="advanced" Required="true" Mask="false">120</Config>
+  <Config Name="Model stop timeout" Target="MODEL_STOP_TIMEOUT_SECONDS" Default="120" Mode="" Description="Timeout for level-2 offload and graceful hard-stop fallback" Type="Variable" Display="advanced" Required="true" Mask="false">120</Config>
   <Config Name="Minimum free VRAM" Target="MIN_FREE_VRAM_MIB" Default="90000" Mode="" Description="Required free MiB before vLLM starts; prevents OOM while ComfyUI holds a large model" Type="Variable" Display="advanced" Required="true" Mask="false">90000</Config>
   <Config Name="ComfyUI URL" Target="COMFYUI_BASE_URL" Default="http://host.docker.internal:8188" Mode="" Description="When VRAM is low, release Comfy cached models only if its queue is completely idle; blank disables" Type="Variable" Display="advanced" Required="false" Mask="false">http://host.docker.internal:8188</Config>
   <Config Name="Comfy release timeout" Target="COMFYUI_FREE_TIMEOUT_SECONDS" Default="120" Mode="" Description="Maximum seconds to wait for idle ComfyUI to release cached VRAM" Type="Variable" Display="advanced" Required="true" Mask="false">120</Config>

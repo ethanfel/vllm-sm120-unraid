@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Wake-on-request reverse proxy and lifecycle controller for vLLM.
 
-The proxy stays resident on the public port while the vLLM child process is
-fully stopped when idle. The first OpenAI request starts vLLM, waits for its
-private health endpoint, and then forwards the original request.
+The proxy stays resident on the public port while the vLLM model is offloaded
+when idle. Level-2 sleep is the default: it discards weights and KV cache while
+keeping the initialized private vLLM process available for a faster reload.
+The controller can also use the legacy full-process-stop behavior.
 """
 
 from __future__ import annotations
@@ -161,6 +162,7 @@ class ModelController:
     idle_timeout: float
     load_timeout: float
     stop_timeout: float
+    idle_offload_mode: str = "level2"
     min_free_vram_mib: int = 0
     comfyui_base_url: str = ""
     comfyui_free_timeout: float = 120.0
@@ -188,7 +190,11 @@ class ModelController:
         limits = httpx.Limits(max_connections=100, max_keepalive_connections=20)
         self.client = httpx.AsyncClient(timeout=timeout, limits=limits)
         self.watchdog_task = asyncio.create_task(self._idle_watchdog())
-        LOG.info("Model is unloaded; waiting for the first /v1 request")
+        LOG.info(
+            "Model is unloaded; waiting for the first /v1 request "
+            "(idle offload mode: %s)",
+            self.idle_offload_mode,
+        )
 
     async def close(self) -> None:
         if self.watchdog_task is not None:
@@ -243,6 +249,33 @@ class ModelController:
         raise ModelUnavailable(
             f"vLLM did not become ready within {self.load_timeout:g}s: {last_detail}"
         )
+
+    async def _post_vllm_control(
+        self,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+        json_body: dict[str, object] | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        """Call a private vLLM lifecycle endpoint and require success."""
+        assert self.client is not None
+        try:
+            response = await self.client.post(
+                f"{self.upstream_url}{path}",
+                params=params,
+                json=json_body,
+                timeout=timeout or self.load_timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise ModelUnavailable(f"vLLM lifecycle request {path} failed: {exc}") from exc
+        if not response.is_success:
+            detail = response.text.strip().replace("\n", " ")[:500]
+            suffix = f": {detail}" if detail else ""
+            raise ModelUnavailable(
+                f"vLLM lifecycle request {path} returned HTTP "
+                f"{response.status_code}{suffix}"
+            )
 
     async def _gpu_free_memory_mib(self) -> int | None:
         try:
@@ -321,9 +354,29 @@ class ModelController:
 
     async def ensure_loaded(self) -> None:
         async with self.transition_lock:
-            if self.process is not None and self.process.returncode is None:
+            process = self.process
+            if process is not None and process.returncode is None:
                 async with self.state_lock:
-                    if self.state == "ready":
+                    state = self.state
+                if state == "ready":
+                    return
+                if state == "offloaded" and self.idle_offload_mode == "level2":
+                    try:
+                        await self._ensure_vram_available()
+                    except ModelUnavailable as exc:
+                        await self._set_state("offloaded", str(exc))
+                        raise
+                    try:
+                        await self._wake_level2_locked(process)
+                    except ModelUnavailable as exc:
+                        LOG.warning(
+                            "Level-2 wake failed; falling back to a full vLLM restart: %s",
+                            exc,
+                        )
+                        await self._stop_process_locked("level-2 wake failure")
+                    else:
+                        await self._set_state("ready")
+                        LOG.info("vLLM woke from level-2 offload")
                         return
 
             if self.process is not None:
@@ -361,6 +414,28 @@ class ModelController:
 
             await self._set_state("ready")
             LOG.info("vLLM is ready on the private port %d", self.upstream_port)
+
+    async def _wake_level2_locked(
+        self, process: asyncio.subprocess.Process
+    ) -> None:
+        if process.returncode is not None:
+            raise ModelUnavailable(
+                f"vLLM exited before wake with status {process.returncode}"
+            )
+        await self._set_state("waking")
+        started = time.monotonic()
+        LOG.info("Waking vLLM from level-2 offload")
+        await self._post_vllm_control(
+            "/wake_up", params={"tags": "weights"}
+        )
+        await self._post_vllm_control(
+            "/collective_rpc",
+            json_body={"method": "reload_weights"},
+        )
+        await self._post_vllm_control(
+            "/wake_up", params={"tags": "kv_cache"}
+        )
+        LOG.info("Level-2 wake completed in %.2fs", time.monotonic() - started)
 
     async def begin_request(self) -> None:
         async with self.state_lock:
@@ -409,7 +484,48 @@ class ModelController:
         LOG.info("vLLM is fully unloaded")
         return True
 
-    async def unload(self, reason: str, require_idle: bool = True) -> bool:
+    async def _sleep_level2_locked(self, reason: str) -> bool:
+        process = self.process
+        if process is None or process.returncode is not None:
+            await self._stop_process_locked("cleaning up before level-2 offload")
+            return True
+
+        async with self.state_lock:
+            state = self.state
+        if state == "offloaded":
+            return True
+        if state != "ready":
+            return False
+
+        await self._set_state("sleeping")
+        started = time.monotonic()
+        LOG.info("Offloading vLLM with level-2 sleep (%s)", reason)
+        try:
+            await self._post_vllm_control(
+                "/sleep",
+                params={"level": "2"},
+                timeout=self.stop_timeout,
+            )
+        except ModelUnavailable as exc:
+            LOG.warning(
+                "Level-2 offload failed; fully stopping vLLM instead: %s", exc
+            )
+            return await self._stop_process_locked("level-2 offload failure")
+
+        await self._set_state("offloaded")
+        LOG.info("Level-2 offload completed in %.2fs", time.monotonic() - started)
+        return True
+
+    async def offload(self, reason: str, require_idle: bool = True) -> bool:
+        async with self.transition_lock:
+            async with self.state_lock:
+                if require_idle and self.inflight > 0:
+                    return False
+            if self.idle_offload_mode == "level2":
+                return await self._sleep_level2_locked(reason)
+            return await self._stop_process_locked(reason)
+
+    async def hard_stop(self, reason: str, require_idle: bool = True) -> bool:
         async with self.transition_lock:
             async with self.state_lock:
                 if require_idle and self.inflight > 0:
@@ -427,7 +543,7 @@ class ModelController:
                     and time.monotonic() - self.last_activity >= self.idle_timeout
                 )
             if should_unload:
-                await self.unload(
+                await self.offload(
                     f"idle for {self.idle_timeout:g}s", require_idle=True
                 )
 
@@ -437,10 +553,12 @@ class ModelController:
             return {
                 "state": self.state,
                 "model_loaded": self.state == "ready",
+                "process_running": process is not None and process.returncode is None,
                 "pid": process.pid if process is not None else None,
                 "inflight_requests": self.inflight,
                 "idle_seconds": round(time.monotonic() - self.last_activity, 1),
                 "idle_timeout_seconds": self.idle_timeout,
+                "idle_offload_mode": self.idle_offload_mode,
                 "minimum_free_vram_mib": self.min_free_vram_mib,
                 "comfyui_auto_release": bool(self.comfyui_base_url),
                 "last_error": self.last_error,
@@ -458,7 +576,7 @@ class ModelController:
             raise PermissionError("Model-cache deletion is disabled")
         async with self.transition_lock:
             async with self.state_lock:
-                if self.state in {"loading", "stopping"}:
+                if self.state in {"loading", "sleeping", "waking", "stopping"}:
                     raise ModelUnavailable(
                         f"Cannot delete cached models while vLLM is {self.state}"
                     )
@@ -534,9 +652,18 @@ def create_app(controller: ModelController) -> FastAPI:
     @app.post("/on-demand/unload")
     async def unload(request: Request) -> dict[str, object]:
         require_control_access(request)
-        if not await controller.unload("manual API request", require_idle=True):
+        if not await controller.offload("manual API request", require_idle=True):
             raise HTTPException(
-                status_code=409, detail="Cannot unload while requests are in flight"
+                status_code=409, detail="Cannot offload while requests are in flight"
+            )
+        return await controller.snapshot()
+
+    @app.post("/on-demand/stop")
+    async def stop(request: Request) -> dict[str, object]:
+        require_control_access(request)
+        if not await controller.hard_stop("manual hard-stop API request", require_idle=True):
+            raise HTTPException(
+                status_code=409, detail="Cannot stop while requests are in flight"
             )
         return await controller.snapshot()
 
@@ -660,6 +787,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--idle-timeout", type=float, default=600.0)
     parser.add_argument("--load-timeout", type=float, default=1200.0)
     parser.add_argument("--stop-timeout", type=float, default=120.0)
+    parser.add_argument(
+        "--idle-offload-mode", choices=("level2", "stop"), default="level2"
+    )
     parser.add_argument("--min-free-vram-mib", type=int, default=0)
     parser.add_argument("--comfyui-base-url", default="")
     parser.add_argument("--comfyui-free-timeout", type=float, default=120.0)
@@ -694,6 +824,7 @@ def main() -> None:
         idle_timeout=args.idle_timeout,
         load_timeout=args.load_timeout,
         stop_timeout=args.stop_timeout,
+        idle_offload_mode=args.idle_offload_mode,
         min_free_vram_mib=args.min_free_vram_mib,
         comfyui_base_url=args.comfyui_base_url,
         comfyui_free_timeout=args.comfyui_free_timeout,

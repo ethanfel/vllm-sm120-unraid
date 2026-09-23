@@ -19,6 +19,7 @@ SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-qwen3.8-27b-aeon-nvfp4}"
 HOST="${VLLM_HOST:-0.0.0.0}"
 PORT="${VLLM_PORT:-8000}"
 ENABLE_ON_DEMAND="${ENABLE_ON_DEMAND:-true}"
+IDLE_OFFLOAD_MODE="${IDLE_OFFLOAD_MODE:-level2}"
 VLLM_INTERNAL_PORT="${VLLM_INTERNAL_PORT:-8001}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-262144}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
@@ -30,6 +31,13 @@ ENABLE_MTP="${ENABLE_MTP:-true}"
 KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-fp8}"
 
 if bool_enabled "${ENABLE_ON_DEMAND}"; then
+  case "${IDLE_OFFLOAD_MODE}" in
+    level2|stop) ;;
+    *)
+      echo "IDLE_OFFLOAD_MODE must be 'level2' or 'stop'." >&2
+      exit 2
+      ;;
+  esac
   if [[ "${VLLM_INTERNAL_PORT}" == "${PORT}" ]]; then
     echo "VLLM_INTERNAL_PORT must differ from the public VLLM_PORT when on-demand mode is enabled." >&2
     exit 2
@@ -84,6 +92,14 @@ args=(
   --enable-chunked-prefill
 )
 
+# Level-2 sleep discards model weights and KV cache but retains the initialized
+# private vLLM process. Its development-only lifecycle endpoints remain bound
+# to the loopback-only upstream port and are never exposed by the controller.
+if bool_enabled "${ENABLE_ON_DEMAND}" && [[ "${IDLE_OFFLOAD_MODE}" == "level2" ]]; then
+  export VLLM_SERVER_DEV_MODE=1
+  args+=(--enable-sleep-mode)
+fi
+
 if bool_enabled "${ENABLE_PREFIX_CACHING:-true}"; then
   args+=(--enable-prefix-caching)
 fi
@@ -127,7 +143,7 @@ echo "Profile: max_model_len=${MAX_MODEL_LEN}, gpu_memory_utilization=${GPU_MEMO
 # must be a distinct argument so quoted JSON remains intact.
 if bool_enabled "${ENABLE_ON_DEMAND}"; then
   echo "On-demand API listening on ${HOST}:${PORT}; model process starts on the first /v1 request"
-  echo "Idle unload: ${IDLE_TIMEOUT_SECONDS:-600}s; model load timeout: ${MODEL_LOAD_TIMEOUT_SECONDS:-1200}s"
+  echo "Idle offload: ${IDLE_TIMEOUT_SECONDS:-600}s (${IDLE_OFFLOAD_MODE}); model load timeout: ${MODEL_LOAD_TIMEOUT_SECONDS:-1200}s"
   exec python3 /usr/local/bin/vllm-on-demand-server \
     --listen-host "${HOST}" \
     --listen-port "${PORT}" \
@@ -135,6 +151,7 @@ if bool_enabled "${ENABLE_ON_DEMAND}"; then
     --idle-timeout "${IDLE_TIMEOUT_SECONDS:-600}" \
     --load-timeout "${MODEL_LOAD_TIMEOUT_SECONDS:-1200}" \
     --stop-timeout "${MODEL_STOP_TIMEOUT_SECONDS:-120}" \
+    --idle-offload-mode "${IDLE_OFFLOAD_MODE}" \
     --min-free-vram-mib "${MIN_FREE_VRAM_MIB:-90000}" \
     --comfyui-base-url "${COMFYUI_BASE_URL:-}" \
     --comfyui-free-timeout "${COMFYUI_FREE_TIMEOUT_SECONDS:-120}" \

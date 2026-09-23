@@ -1,6 +1,6 @@
 services:
   vllm:
-    image: ghcr.io/ethanfel/vllm-sm120-unraid:0.3.0
+    image: ghcr.io/ethanfel/vllm-sm120-unraid:0.4.0
     container_name: vLLM
     runtime: nvidia
     gpus: all
@@ -27,6 +27,7 @@ services:
       MAX_NUM_BATCHED_TOKENS: ${MAX_NUM_BATCHED_TOKENS:-8192}
       ENABLE_ON_DEMAND: ${ENABLE_ON_DEMAND:-true}
       IDLE_TIMEOUT_SECONDS: ${IDLE_TIMEOUT_SECONDS:-600}
+      IDLE_OFFLOAD_MODE: ${IDLE_OFFLOAD_MODE:-level2}
       MODEL_LOAD_TIMEOUT_SECONDS: ${MODEL_LOAD_TIMEOUT_SECONDS:-1200}
       MODEL_STOP_TIMEOUT_SECONDS: ${MODEL_STOP_TIMEOUT_SECONDS:-120}
       MIN_FREE_VRAM_MIB: ${MIN_FREE_VRAM_MIB:-90000}
